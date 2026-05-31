@@ -10,8 +10,8 @@
 // --- YOUR PHYSICAL HARDWARE ---
 // 16 channels: Enter here exactly the physical lengths of your 16 strips.
 const uint16_t stripLengths[ChannelCount] = { 
-    144, 144, 144, 144, 144, 144, 144, 144, // Channels 0 to 7
-    144, 144, 144, 144, 144, 144, 144, 144  // Channels 8 to 15
+    144, 144, 0, 0, 0, 0, 0, 0, // Channels 0 to 7
+    0, 0, 0, 0, 0, 0, 0, 0  // Channels 8 to 15
 };
 
 /// 16 channels: Enter the 16 pins here! (Check if your board has these 16 pins available as outputs)
@@ -20,35 +20,49 @@ const uint8_t pins[ChannelCount] = {
     8, 9, 10, 11, 12, 13, 14, 48 // Channels 8 to 15
 };
 
-// Dynamic block size (Will be automatically overwritten by the 'L' command from DOF)
-uint16_t dofBlockSize = 1100; 
+ // If you send each channel individually, then the maximum number of the longest strip must be smaller. If you send everything over one channel, then the number must be the same or larger than all the LEDs in the system.
+const uint16_t dofBlockSize = 1100;
+const uint16_t BufferSize = 8192;
 
 // --- 16-CHANNEL ENGINE ---
 // We are now using the X16 method of the LCD hardware engine of the ESP32-S3
 typedef NeoPixelBus<NeoGrbFeature, NeoEsp32LcdX16Ws2812xMethod> MyPixelBus;
 MyPixelBus* strips[ChannelCount];
 
-// --- DOUBLE BUFFER FOR 16 CHANNELS ---
-// Expanded to 16 KB so that DOF can send us data without any restrictions
-uint8_t rgbDataBuffer[16384]; 
 
-void Ack()  { Serial.write('A'); Serial.flush(); }
-void Nack() { Serial.write('N'); Serial.flush(); }
+uint8_t rgbDataBuffer[BufferSize]; 
+uint16_t ReceivedSize = 0; 
+
+void Ack() {
+    while (!Serial); 
+    Serial.write('A');
+}
 
 void ShowAll() {
     for(uint8_t i = 0; i < ChannelCount; i++) {
-        while(!strips[i]->CanShow()) { yield(); }
         strips[i]->Show();
     }
 }
 
+void canShow(){
+    bool isReady = false;
+    while (!isReady){
+        isReady = true;
+        for(uint8_t i = 0; i < ChannelCount; i++) {
+            if (!strips[i]->CanShow()){
+                isReady = false;
+                break;
+            }
+        }
+    }
+
+}
+
 void setup() {
-    // Double USB hardware buffer for the 16 channels
-    Serial.setRxBufferSize(16384); 
+    Serial.setRxBufferSize(BufferSize);
     Serial.begin(115200);
-    Serial.setTimeout(100); 
-    
-    // 1. Initialize hardware
+    Serial.setTimeout(1000); 
+
     for(uint8_t i = 0; i < ChannelCount; i++) {
         strips[i] = new MyPixelBus(stripLengths[i], pins[i]);
         strips[i]->Begin();
@@ -56,24 +70,22 @@ void setup() {
     }
     ShowAll();
     
-    // 2. LED boat test (Now works over all 16 channels!)
     #if ENABLE_LED_TEST
-        // Rot
+        uint32_t start = millis();
+        while (millis() - start < 500) {
+            if (Serial.available() > 0) return;
+            yield();
+        }
+        
         for(uint8_t i=0; i<ChannelCount; i++) strips[i]->ClearTo(RgbColor(255, 0, 0));
-        ShowAll();
-        delay(500);
+        ShowAll(); delay(500);
         
-        // Grün
         for(uint8_t i=0; i<ChannelCount; i++) strips[i]->ClearTo(RgbColor(0, 255, 0));
-        ShowAll();
-        delay(500);
+        ShowAll(); delay(500);
         
-        // Blau
         for(uint8_t i=0; i<ChannelCount; i++) strips[i]->ClearTo(RgbColor(0, 0, 255));
-        ShowAll();
-        delay(500);
-
-        // Turn everything off again and get ready for DOF
+        ShowAll(); delay(500);
+        
         for(uint8_t i=0; i<ChannelCount; i++) strips[i]->ClearTo(RgbColor(0, 0, 0));
         ShowAll();
     #endif
@@ -85,69 +97,71 @@ void loop() {
         switch (receivedByte) {
             case 'L': 
                 { 
-                    uint8_t buf[2]; 
+                    uint8_t buf[2];
                     if (Serial.readBytes(buf, 2) == 2) {
-                        dofBlockSize = (buf[0] << 8) | buf[1];
-                        if (dofBlockSize == 0) dofBlockSize = 1100; 
+                        ReceivedSize = (buf[0] << 8) | buf[1];
+                        if (ReceivedSize == 0) ReceivedSize = dofBlockSize; 
                     }
-                    Ack(); 
                 } 
                 break;
             case 'F': 
-                if (!Fill()) { Nack(); } 
+                if (!Fill()) { 
+                    while(Serial.available()) Serial.read(); 
+                }
                 break;
             case 'R': 
-                if (!ReceiveData()) { Nack(); } 
-                break; 
+                if (!ReceiveData()) { 
+                    while(Serial.available()) Serial.read(); 
+                }
+                break;
             case 'O': 
-                ShowAll(); 
-                Ack(); 
+                canShow();
+                ShowAll();
                 break;
             case 'C': 
                 for(uint8_t i = 0; i < ChannelCount; i++) {
-                    strips[i]->ClearTo(RgbColor(0)); 
+                    strips[i]->ClearTo(RgbColor(0));
                 }
                 ShowAll(); 
-                Ack(); 
                 break;
             case 'V': 
+                while (!Serial);
                 Serial.write(FirmwareVersionMajor); 
-                Serial.write(FirmwareVersionMinor); 
-                Ack(); 
+                Serial.write(FirmwareVersionMinor);
                 break;       
             case 'M': 
-                Serial.write((byte)(1100 >> 8)); 
-                Serial.write((byte)(1100 & 255)); 
-                Ack(); 
+                while (!Serial);
+                Serial.write((byte)(dofBlockSize >> 8));
+                Serial.write((byte)(dofBlockSize & 255));  
                 break;  
             default: 
                 while(Serial.available()) Serial.read(); 
-                Nack(); 
                 break;
         }
+        Ack();
     }
+    vTaskDelay(1);
 }
 
 bool Fill() {
     uint8_t head[4];
     if (Serial.readBytes(head, 4) != 4) return false;
-    word firstLed = (head[0] << 8) | head[1];
-    word numberOfLeds = (head[2] << 8) | head[3];
+    uint16_t firstLed = (head[0] << 8) | head[1];
+    uint16_t numberOfLeds = (head[2] << 8) | head[3];
+    
     uint8_t rgb[3];
     if (Serial.readBytes(rgb, 3) != 3) return false;
     RgbColor color(rgb[0], rgb[1], rgb[2]);
 
-    for (word i = 0; i < numberOfLeds; i++) { 
-        word dofIndex = firstLed + i;
-        
-        word channel = dofIndex / dofBlockSize;
-        word ledIndex = dofIndex % dofBlockSize;
+    for (uint16_t i = 0; i < numberOfLeds; i++) { 
+        uint16_t dofIndex = firstLed + i;
+        uint16_t channel = dofIndex / ReceivedSize;
+        uint16_t ledIndex = dofIndex % ReceivedSize;
         
         if (channel < ChannelCount && ledIndex < stripLengths[channel]) {
             strips[channel]->SetPixelColor(ledIndex, color);
         }
     }
-    Ack();
     return true;
 }
 
@@ -155,29 +169,29 @@ bool ReceiveData() {
     uint8_t head[4];
     if (Serial.readBytes(head, 4) != 4) return false; 
     
-    word firstLed = (head[0] << 8) | head[1];
-    word numberOfLeds = (head[2] << 8) | head[3];
-    
+    uint16_t firstLed     = (head[0] << 8) | head[1];
+    uint16_t numberOfLeds = (head[2] << 8) | head[3];
+
     size_t bytesToRead = numberOfLeds * 3;
-    // Sicherheitsprüfung auf unseren neuen, größeren Puffer
     if (bytesToRead > sizeof(rgbDataBuffer)) return false;
     if (Serial.readBytes(rgbDataBuffer, bytesToRead) != bytesToRead) return false;
-    
+ 
+    uint16_t dofIndex = firstLed;
+    uint16_t channel  = dofIndex / ReceivedSize;
+    uint16_t ledIndex = dofIndex % ReceivedSize;
+
     size_t bufIdx = 0;
-    for (word i = 0; i < numberOfLeds; i++) { 
+    for (uint16_t i = 0; i < numberOfLeds; i++) {
         uint8_t r = rgbDataBuffer[bufIdx++];
         uint8_t g = rgbDataBuffer[bufIdx++];
         uint8_t b = rgbDataBuffer[bufIdx++];
-        
-        word dofIndex = firstLed + i;
-        
-        word channel = dofIndex / dofBlockSize;
-        word ledIndex = dofIndex % dofBlockSize;
-        
+       
+        if (ledIndex +1 > stripLengths[channel]){channel++; ledIndex = firstLed;}
+
         if (channel < ChannelCount && ledIndex < stripLengths[channel]) {
             strips[channel]->SetPixelColor(ledIndex, RgbColor(r, g, b));
         }
+        ledIndex ++;
     }
-    Ack();
     return true;
 }
