@@ -1,225 +1,115 @@
-# Attention: There are currently still errors that are being fixed!
+# ESP32-S3 High-Speed USB LED Controller (8/16 Channels) for DirectOutput Framework (DOF)
 
-# ESP32-S3 VPinball LED Software (High Performance)
+This project enables the control of large LED installations (e.g., in Virtual Pinball Cabinets) using an ESP32-S3 via USB. It serves as a high-performance alternative to the classic Teensy and utilizes the dedicated hardware of the ESP32-S3 to drive addressable LEDs on up to 16 channels in parallel.
 
-An ultra-high-performance, cost-effective, and native drop-in replacement for the legendary Teensy 3.2 and Teensy 4.1 controllers in Virtual Pinball (vPin) cabinets. Supporting both **8-channel** and **16-channel** parallel DMA outputs.
+## 🚀 Performance & Architecture
 
----
+The backbone of this code is the utilization of the ESP32-S3 LCD-DMA method. As a result, all pixels across the 8 or 16 channels are pushed **completely in parallel and at extremely high speed** directly to the pins without straining the CPU.
 
-## Introduction: ESP32-S3 – The DOF Teensy Killer
+### The Current Bottleneck (Profiling)
+This project was extensively profiled at the hardware level. **Important: The following data is not based on theory, but on real physical measurement results directly from the microcontroller.**
 
-For years, the **Teensy 3.2** (and later the **Teensy 4.1**) paired with an OctoWS2811 shield has been the gold standard for controlling addressable LED strips (side-board matrix, backglass matrix, undercabinet lighting) in Virtual Pinball setups via the DirectOutput Framework (DOF). 
+Profiling a single frame with 2,400 LEDs shows the following distribution:
+* **~85 % of the time:** Waiting for USB data reception from Windows/DOF.
+* **~1 % of the time:** Internal data processing and assignment.
+* **~8.5 % of the time:** The actual LED output to the pins (`Show()` / `CanShow()`).
 
-However, Teensy setups have become highly impractical for the community:
-* **Teensy 3.2** is completely discontinued, making it impossible to buy or forcing users to pay extreme scalper prices.
-* **Teensy 4.1** is widely available but highly expensive, oversized, and severely overpowered for simply shifting LED bytes.
-* The official **OctoWS2811 adaptor boards** add extra cost, delivery times, and physical bulk to the build.
+**What this means for your Framerate (FPS):**
+Because the Windows driver's serial USB transmission throttles the data stream, the refresh rate (Hz) depends heavily on the total number of LEDs. The transfer scales almost linearly:
+* **2,400 LEDs:** limited to **~30 FPS (Hz)**
+* **1,100 LEDs:** limited to **~60-65 FPS (Hz)**
+* **550 LEDs:** reaches **~110-120 FPS (Hz)**
 
-This project introduces a **true native alternative**: The **ESP32-S3**. By utilizing its advanced internal hardware peripherals, the ESP32-S3 achieves the exact same real-time performance and refresh rates as a Teensy at a fraction of the cost. It acts as a native drop-in replacement, meaning **no changes are required on the PC side or within DOF**.
+*(For context: While the human eye generally starts perceiving basic motion as fluid at around 24-30 FPS, fast-paced LED light effects in Virtual Pinball require at least 60 FPS to appear truly smooth and match the refresh rate of modern playfield monitors.)*
 
----
+The massive processing speed of the ESP32-S3 is currently being throttled by this Windows USB bottleneck. **We are currently working on an alternative solution to completely shatter this serial bottleneck.** Updates will follow shortly.
 
-## Hardware & Cost Comparison: Teensy Setup vs. ESP32-S3 Setup
+## 🔌 Hardware Recommendations (Wiring)
 
-Below is a realistic, real-world cost and hardware comparison of getting a fully stable, flicker-free, multi-channel addressable LED setup running in a cabinet.
+For a stable and error-free operation in a pinball cabinet environment, please adhere to these hardware best practices:
 
-| Feature | Teensy 3.2 Setup (Legacy) | Teensy 4.1 Setup (Current) | ESP32-S3 Setup (This Project) |
-| :--- | :--- | :--- | :--- |
-| **Processor** | ARM Cortex-M4 @ 120 MHz | ARM Cortex-M7 @ 600 MHz | **Xtensa Dual-Core LX7 @ 240 MHz** |
-| **Controller Cost** | Discontinued (Scalper: $50+) | $30.00 – $38.00 USD | **$4.00 – $7.00 USD** (ESP32-S3 DevKit) |
-| **Required Interface** | $10.00 – $15.00 USD (OctoWS2811) | $10.00 – $15.00 USD (OctoWS2811) | **$0.50 – $1.50 USD** (74HCT245 or SN74AHCT125N) |
-| **Total Hardware Cost**| **~$60.00+ USD** | **$40.00 – $53.00 USD** | **$4.50 – $8.50 USD** |
-| **Parallel Channels** | 8 channels | 8 channels | **8 or 16 channels** (Parallel Hardware DMA) |
-| **USB Interface** | Native USB Full-Speed | Native USB High-Speed | Native USB OTG (CDC Full-Speed) |
-| **Availability** | Out of stock / Dead | Available but expensive | **Instantly available worldwide** |
+* **Level Shifter (3.3V to 5V):** The ESP32-S3 outputs a 3.3V data signal, but WS2812b/addressable LEDs expect a 5V signal. Directly connecting them might work for short distances, but it often leads to flickering or signal drops (especially near solenoids/contactors). It is highly recommended to use a fast Level Shifter (e.g., **74AHCT125** or **SN74HCT245**) on all active data lines.
+* **Data Resistor:** Place a resistor (approx. **330Ω to 470Ω**) in series on the data line, ideally between the level shifter and the first LED of each strip. This protects the first pixel from voltage spikes and stabilizes the data signal.
 
-### Why Teensy is Overpowered & Where the Limits Lie
-The Teensy's CPU clock speeds are impressive, but running them solely to pull bytes out of a USB buffer and push them down an LED strip is an extreme underutilization of resources. 
+## 🛠 Dependencies
 
-The bottleneck in addressable LED setups is **never the raw CPU clock speed**. It is defined by two fixed limits:
-1. **The WS2812B Protocol Limit:** Every single WS2812B LED requires exactly **30 microseconds (µs)** to receive its 24-bit color data. Pushing data sequentially means the more LEDs you have, the lower your frame rate drops.
-2. **USB Buffer Saturations:** High-refresh-rate cabinets (4K @ 120Hz/240Hz) flood the controller with data frames every few milliseconds. If the controller's serial buffer is too small or processing blocks the incoming stream, bytes are lost, resulting in DOF timeout exceptions.
+To compile this project without errors, exactly these versions must be installed in the Arduino IDE:
 
-### Why the ESP32-S3 is Just as Fast
-The ESP32-S3 features a specialized internal hardware peripheral: the **LCD Master Parallel Interface**. Combined with **Direct Memory Access (DMA)**, the ESP32-S3 can output data to **8 or 16 pins simultaneously (in parallel)** entirely in the background. 
+* **ESP32 Core Board Manager:** Version `2.0.17` (Newer 3.x versions can cause compatibility issues with the DMA timers).
+* **NeoPixelBus:** By Makuna (Latest version via the Library Manager).
 
-The CPU simply prepares the memory buffer and hands it over to the hardware engine. Pushing data to 16 channels takes the exact same amount of time as pushing it to a single channel.
+* **Tool settings:** `USB CDC on Boot: "Enable"` `USB Mode: "Hardware CDC and JTAG"`
 
----
+## ⚙️ DOF Configuration (CabinetConfig.xml)
 
-## Performance Metrics & Technical Specifications
+Integration into the DirectOutput Framework is extremely simple. The ESP32-S3 presents itself to Windows and DOF exactly like a classic Teensy.
 
-### The 120Hz Frame Budget
-To synchronize perfectly with modern 4K 120Hz gaming monitors, the entire cabinet lighting cycle must complete within a frame budget of **8.33 milliseconds**.
-* Because the ESP32-S3 transmits data to all channels in parallel, the total transmission time is determined **only by the single longest strip connected to the board**.
-* **Maximum Strip Length for 120Hz:** `8.33 ms / 0.03 ms per LED = ~277 LEDs` per channel. 
-* As long as no single channel exceeds ~270 LEDs, your cabinet will run at a flawless, native 120Hz refresh rate.
+### Best Practice for Maximum Speed
+It is highly recommended **not** to pass 8 or 16 individual strips from DOF via USB. This creates unnecessary overhead. 
+The fastest and most efficient way is to use **only `LedStrip1`** in DOF and enter the **total number of all LEDs** in the cabinet as a continuous block. The distribution of the LEDs to the respective physical pins is handled internally by the code on the ESP32-S3 in fractions of a millisecond.
 
-### Native USB Speed
-The ESP32-S3 connects directly to the PC via its native USB On-The-Go (OTG) peripheral configured as a Virtual COM Port (USB CDC). It completely bypasses traditional hardware UART baud rate restrictions. Data is transferred at native USB Full-Speed (up to 12 Mbps), filling the controller's buffer instantly.
+### Example XML Configuration
+Enter the ESP32-S3 in your `CabinetConfig.xml` in the `<OutputControllers>` section as a standard `<TeensyStripController>`. Baud rate settings are not necessary and will be ignored by the S3's native USB.
 
----
-
-## Native Compatibility & Smart Routing
-
-This firmware implements the original Teensy assembly protocol natively. It responds to all standard DOF serial commands:
-* `L` (Set Strip Length)
-* `R` (Receive LED Data)
-* `O` (Output / Show LEDs)
-* `C` (Clear All)
-* `F` (Fill Block)
-* `V` (Firmware Version Handshake)
-* `M` (Protocol Marker)
-
-### The "Smart-Decoder" Architecture
-Older firmware variants required hardcoded block sizes (like the rigid 1100-step Teensy divider) which forced DOF to pad the USB stream with thousands of empty, black "dummy" pixels just to align the channels. 
-
-This firmware is smart:
-1. Upon startup, it intercepts the `L` command from DOF to dynamically read the exact block length configured in your `cabinet.xml`.
-2. It parses incoming sequential stream indexes automatically using this dynamic block size (`channel = dofIndex / dofBlockSize`).
-3. It filters out unneeded padding bytes using a local hardware layout array (`stripLengths`), preventing memory overflow and eliminating signal degradation on shorter strips.
-
----
-
-## Hardware Requirements & Wiring
-
-### 1. Level Shifter (Mandatory!)
-The ESP32-S3 operates on **3.3V logic**, whereas WS2812B LED strips require a **5V logic signal**. 
-* **DO NOT use generic bi-directional I2C level shifters** (the small red/blue boards with MOSFETs and pull-up resistors like the **TXS0108E**). They have slow rise times and will completely distort the high-speed 800kHz WS2812B data signal, causing severe flickering and direction-sensing loops when driving long cabinet wires.
-* **Recommended:** Use a fast CMOS level shifter like the **SN74AHCT125N** (4 channels, DIP-14, highly recommended for easy soldering) or **74HCT245** (8 channels). These ICs easily handle the nanosecond transition speeds and active push-pull drive strength required for clean, robust LED signals.
-
-### 2. Data Line Resistors
-Place a **330 Ω to 470 Ω resistor** on each data line between the level shifter output and the first LED of the strip. This prevents voltage spikes and impedance reflections from damaging the first pixel.
-
-### 3. Common Ground
-Ensure that the Ground (GND) of the ESP32-S3, the Ground of the Level Shifter, and the Ground of the LED Power Supplies are **physically tied together**. Missing common grounds are the #1 cause of data corruption.
-
----
-
-## Software Dependencies & Installation
-
-### Required Libraries & Cores
-1. **Arduino ESP32 Board Core:** **Version 2.0.17** is strictly required! 
-   * *Note:* **Do not use v3.x cores**, as breaking changes in the ESP32 network/LCD APIs will cause compilation errors with the parallel DMA methods of NeoPixelBus.
-2. **NeoPixelBus by Makuna:** Install the latest version via the Arduino Library Manager. (Utilizes the ultra-efficient `NeoEsp32LcdX8Ws2812xMethod` and `NeoEsp32LcdX16Ws2812xMethod` hardware engines).
-
-### Arduino IDE Tools Settings
-When flashing the ESP32-S3, you **must** apply the following settings under the **Tools** menu, otherwise native USB communication will fail:
-
-* **Board:** `ESP32S3 Dev Module` (or your specific S3 board variant)
-* **USB CDC On Boot:** `Enabled`  <-- **CRITICAL!** Maps the native USB port directly to `Serial`.
-* **Flash Size:** `4MB (32Mb)` (or matching your board)
-* **Partition Scheme:** `Huge APP (3MB No OTA/1MB SPIFFS)`
-* **Upload Speed:** `921600`
-
----
-
-## Sketch Customization
-
-Before uploading either the 8-channel or 16-channel sketch, adapt the hardware configurations at the top of the file to match your physical cabinet layout:
-
-```cpp
-// Define how many physical LEDs are connected per channel
-const uint16_t stripLengths[ChannelCount] = { 
-    144, 144, 24, 24, 144, 144, 144, 144 
-};
-
-// Define the GPIO pins mapped to each channel
-const uint8_t pins[ChannelCount] = { 
-    4, 5, 6, 7, 8, 9, 10, 11 
-};
-
-// Power-On Self-Test feature
-#define ENABLE_LED_TEST 1 // Set to 1 to cycle Red, Green, Blue on startup
-```
-
-### PC Configuration (`cabinet.xml`)
-In your DirectOutput `cabinet.xml`, configure the controller exactly like a native Teensy strip controller. 
-* Set your port assignments normally (e.g., RGB strips occupy 3 sequential ports like `P:001`, `P:002`, `P:003`).
-* Set `<SendPerLedStripLength>` to `false` for standard, rock-solid block transmission.
-
----
-
-## Example Real-World Configuration
-
-Here is a complete, production-tested example of a `cabinet.xml` setup using this firmware for a dual sideboard layout (Left Side and Right Side, 144 addressable LEDs each) running on `COM8`.
-
-> **Note on Baud Rate Configuration:** The baud rate inside the configuration is intentionally declared at `12000000` (12 Mbps). While the native hardware USB OTG layer of the ESP32-S3 handles data streams at raw internal bus speeds and ignores old serial speed boundaries, defining a steady 12 Mbps cap on the host application side ensures that the Windows USB-CDC driver allocates optimal full-speed polling windows without artificial software throttling bottlenecks.
-
-### `cabinet.xml`
+Default example 2 channels 2x 144 leds. Total 288 leds (also works)
 ```xml
-<?xml version="1.0"?>
-<Cabinet xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-
-  <Name>My Pin Cab</Name>
-
-  <OutputControllers>
-    <TeensyStripController>
-      <Name>LED Strips 0</Name>
-      <NumberOfLedsStrip1>144</NumberOfLedsStrip1>
-      <NumberOfLedsStrip2>144</NumberOfLedsStrip2>
-      <ComPortName>COM8</ComPortName>
-      <ComPortBaudRate>12000000</ComPortBaudRate>
-      <SendPerLedstripLength>true</SendPerLedstripLength>
-      <TestOnConnect>false</TestOnConnect>
-    </TeensyStripController>
-  </OutputControllers>
-
-  <Toys>  
-    <LedStrip>
-      <Name>Left Side</Name>
-      <Width>1</Width>
-      <Height>144</Height>
-      <LedStripArrangement>LeftRightBottomUp</LedStripArrangement>
-      <ColorOrder>RGB</ColorOrder>
-      <FirstLedNumber>1</FirstLedNumber>
-      <FadingCurveName>SwissLizardsLedCurve</FadingCurveName>
-      <Brightness>100</Brightness>
-      <OutputControllerName>LED Strips 0</OutputControllerName>
-    </LedStrip>
-    <LedStrip>
-      <Name>Right Side</Name>
-      <Width>1</Width>
-      <Height>144</Height>
-      <LedStripArrangement>LeftRightBottomUp</LedStripArrangement>
-      <ColorOrder>RGB</ColorOrder>
-      <FirstLedNumber>145</FirstLedNumber>
-      <FadingCurveName>SwissLizardsLedCurve</FadingCurveName>
-      <Brightness>100</Brightness>
-      <OutputControllerName>LED Strips 0</OutputControllerName>
-    </LedStrip>
-      
-    <LedWizEquivalent>
-      <Name>LedWizEquivalent 30</Name>
-      <LedWizNumber>30</LedWizNumber>
-      <Outputs>
-        <LedWizEquivalentOutput>
-          <OutputName>Left Side</OutputName>
-          <LedWizEquivalentOutputNumber>1</LedWizEquivalentOutputNumber>
-        </LedWizEquivalentOutput>
-        <LedWizEquivalentOutput>
-          <OutputName>Right Side</OutputName>
-          <LedWizEquivalentOutputNumber>4</LedWizEquivalentOutputNumber>
-        </LedWizEquivalentOutput>
-      </Outputs>
-    </LedWizEquivalent>
-  </Toys>
-
-</Cabinet>
+<OutputControllers>
+  <TeensyStripController>
+    <Name>LED Strips 0</Name>
+    <NumberOfLedsStrip1>144</NumberOfLedsStrip1>
+    <NumberOfLedsStrip2>144</NumberOfLedsStrip2>
+    <ComPortName>COM8</ComPortName>
+    <SendPerLedstripLength>false</SendPerLedstripLength>
+    <TestOnConnect>false</TestOnConnect>
+  </TeensyStripController>
+</OutputControllers>
 ```
 
-### Corresponding DirectOutput (DOF) Config Tool Settings
+Fire LEDs for all channels through one channel 1x 288 leds. Total 288 leds.
+```xml
+<OutputControllers>
+  <TeensyStripController>
+    <Name>LED Strips 0</Name>
+    <NumberOfLedsStrip1>288</NumberOfLedsStrip1>
+    <ComPortName>COM8</ComPortName>
+    <SendPerLedstripLength>false</SendPerLedstripLength>
+    <TestOnConnect>false</TestOnConnect>
+  </TeensyStripController>
+</OutputControllers>
+```
 
-#### 1. Controller Assignments (LedWiz Selection)
-![DOF Device Setup](https://github.com/LSatan/ESP32-S3-VPinball-LED-Software/blob/main/img/dof_config_example_1.png)
+In both cases, the rest remains the same.
+```xml
+  <LedStrip>
+    <Name>Left Side</Name>
+    <Width>1</Width>
+    <Height>144</Height>
+    <LedStripArrangement>LeftRightBottomUp</LedStripArrangement>
+    <ColorOrder>RGB</ColorOrder>
+    <FirstLedNumber>1</FirstLedNumber>
+    <FadingCurveName>SwissLizardsLedCurve</FadingCurveName>
+    <Brightness>100</Brightness>
+    <OutputControllerName>LED Strips 0</OutputControllerName>
+  </LedStrip>
+  <LedStrip>
+    <Name>Right Side</Name>
+    <Width>1</Width>
+    <Height>144</Height>
+    <LedStripArrangement>LeftRightBottomUp</LedStripArrangement>
+    <ColorOrder>RGB</ColorOrder>
+    <FirstLedNumber>145</FirstLedNumber>
+    <FadingCurveName>SwissLizardsLedCurve</FadingCurveName>
+    <Brightness>100</Brightness>
+    <OutputControllerName>LED Strips 0</OutputControllerName>
+  </LedStrip>
 
-#### 2. Combine Toys
-![DOF Config Combine Toys](https://github.com/LSatan/ESP32-S3-VPinball-LED-Software/blob/main/img/dof_config_example_2.png)
+............The rest of your XML.
+```
 
-#### 3. Port Mapping
-![DOF Config Port Mapping](https://github.com/LSatan/ESP32-S3-VPinball-LED-Software/blob/main/img/dof_config_example_3.png)
+## 📝 Important Adjustments in the Arduino Sketch
 
----
+For the setup to work smoothly and the LEDs to be assigned correctly, the following parameters in the C++ sketch must absolutely be adapted to your cabinet:
 
-## License & Credits
-This project is released under the MIT License. Built upon the excellent `NeoPixelBus` library by Makuna and inspired by the Virtual Pinball community.
+1. **Lengths of the physical strips (`stripLengths`):** Since we instruct DOF to send all LEDs via a single strip, the ESP32 needs to know how to split this huge data block back up. You must enter the exact number of LEDs for each of your physical channels into the array in the code. This is the only way the LEDs can be assigned to the correct pins.
+2. **Adjust `dofBlockSize`:** If the total number of your LEDs exceeds the default value, the variable `dofBlockSize` (usually defaults to 1100) in the code must be adjusted to the total number of your LEDs.
+3. **`BufferSize`:** The serial buffer in the sketch is set to `8192` bytes by default. This buffer is easily sufficient to receive the complete signal of 2,400 LEDs via a single strip in one go (2,400 LEDs * 3 colors = 7,200 bytes of data).
