@@ -73,6 +73,6 @@ Very few pinball machines use symmetrical strips. This setup reflects a complex 
 This framework provides a dedicated, pre-configured sketch for each communication type. 
 Please navigate to the `examples` folder, choose your preferred connection type (USB, Ethernet, or WiFi), and follow the instructions there for setting up your `cabinet.xml` and pins.
 
-* [➡️ Go to USB Instructions](examples/USB_Config)
-* [➡️ Go to Ethernet (W5500) Instructions](examples/Ethernet_Config)
-* [➡️ Go to WiFi Instructions](examples/WiFi_Config)
+* [➡️ Go to USB Instructions](examples/usb)
+* [➡️ Go to Ethernet (W5500) Instructions](examples/ethernet)
+* [➡️ Go to WiFi Instructions](examples/wifi)
