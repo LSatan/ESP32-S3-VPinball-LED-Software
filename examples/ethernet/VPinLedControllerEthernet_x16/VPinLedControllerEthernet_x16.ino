@@ -9,22 +9,22 @@
 #define W5500_MISO 37
 #define W5500_CS   39
 #define W5500_RST  41
-// Der INT-Pin wird von der Ethernet-Lib nicht benötigt, 
-// er bleibt einfach ungenutzt.
+// The INT pin is not needed by the Ethernet library,
+// it simply remains unused.
 
 // --- LED HARDWARE CONFIG ---
 #define FPS_LED_PIN 48
 #define FREQ_OUT_PIN 2
 #define NUM_STRIPS 16
 
-// --- DEINE HARDWARE PINS (ESP32-S3) ---
+// --- Your HARDWARE PINS (ESP32-S3) ---
 const uint8_t pins[NUM_STRIPS] = {
     1, 4, 5, 6, 7, 8, 9, 10, 11,    // Channels 0 to 7
     12, 13, 14, 15, 16, 17, 18      // Channels 8 to 15
 };
 
-// --- NETZWERK CONFIG ---
-// Da der W5500 den Netzwerk-Stack selbst macht, braucht er eine MAC-Adresse:
+// --- NETWORK CONFIG ---
+// Since the W5500 handles the network stack itself, it needs a MAC address:
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; 
 IPAddress local_ip(10, 10, 10, 100); 
 
@@ -34,7 +34,7 @@ MyPixelBus* strips[NUM_STRIPS];
 NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod> fpsLed(1, FPS_LED_PIN);
 uint8_t fpsLedBrightness = 30;
 
-// Hier nutzen wir jetzt die dedizierte Ethernet UDP-Klasse
+// Here we are now using the dedicated Ethernet UDP class
 EthernetUDP udp; 
 
 uint8_t frameBuffer[36000]; 
@@ -70,10 +70,9 @@ void canShow(){
     }
 }
 
-    // Exakt alle 1000 Millisekunden (1 Sekunde) auswerten
+
 void UpdateFpsLed() {
-    // Diese Funktion wird jetzt direkt in der Hauptschleife aufgerufen, 
-    // am besten direkt nach dem Paket-Empfang.
+	// This function is now called directly in the main loop.
     
         unsigned long currentMillis = millis();
         lastPacketTime = currentMillis;
@@ -88,29 +87,29 @@ void UpdateFpsLed() {
 
         RgbColor fpsColor;
 
-        // Wenn dein 3-Sekunden-Timeout aktiv ist (0 FPS), LED ausmachen oder abdunkeln
+		// If your 1,5-second timeout is active (0 FPS), turn off or dim the LED
         if (currentFps == 0) {
-            fpsColor = RgbColor(0, 0, 0); // Aus (Standby)
+            fpsColor = RgbColor(0, 0, 0); // Off (Standby)
         } 
-        // Die neue, feinere Skala:
+        // The RGB scale:
         else if (currentFps < 20) {
-            fpsColor = RgbColor(255, 0, 0);       // Rot
+            fpsColor = RgbColor(255, 0, 0);       // Red
         } else if (currentFps >= 20 && currentFps <= 29) {
             fpsColor = RgbColor(255, 100, 0);     // Orange
         } else if (currentFps >= 30 && currentFps <= 39) {
-            fpsColor = RgbColor(255, 255, 0);     // Gelb (Aktuelles WLAN)
+            fpsColor = RgbColor(255, 255, 0);     // Yellow
         } else if (currentFps >= 40 && currentFps <= 49) {
-            fpsColor = RgbColor(100, 255, 0);     // Hellgrün
+            fpsColor = RgbColor(100, 255, 0);     // Light green
         } else if (currentFps >= 50 && currentFps <= 59) {
-            fpsColor = RgbColor(0, 255, 0);       // Dunkelgrün
+            fpsColor = RgbColor(0, 255, 0);       // Dark green
         } else if (currentFps >= 60 && currentFps <= 69) {
-            fpsColor = RgbColor(0, 255, 255);     // Cyan (Perfekt)
+            fpsColor = RgbColor(0, 255, 255);     // Cyan (Perfect)
         } else if (currentFps >= 70 && currentFps <= 89) {
-            fpsColor = RgbColor(0, 0, 255);       // Blau
+            fpsColor = RgbColor(0, 0, 255);       // Blue
         } else if (currentFps >= 90 && currentFps <= 119) {
-            fpsColor = RgbColor(148, 0, 211);     // Violett
+            fpsColor = RgbColor(148, 0, 211);     // Violet
         } else { 
-            fpsColor = RgbColor(255, 255, 255);   // Weiß (120+)
+            fpsColor = RgbColor(255, 255, 255);   // White (120+)
         }
 
         fpsLed.SetPixelColor(0, applyBrightness(fpsColor, fpsLedBrightness));
@@ -119,9 +118,9 @@ void UpdateFpsLed() {
 }
 
 void ReconfigureLcdDma(uint16_t* newLengths) {
-    Serial.println("Neues Frame-Layout erkannt! Starte Hardware-Reset...");
+    Serial.println("New frame layout detected! Starting hardware reset...");
 
-    // 1. RAM freigeben
+    // 1. Free up RAM
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
         if (strips[i] != nullptr) {
             delete strips[i];
@@ -131,7 +130,7 @@ void ReconfigureLcdDma(uint16_t* newLengths) {
 
     delay(50); 
 
-    // 3. Streifen mit exakter Länge neu aufbauen
+    // 3. Rebuild strips with exact length
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
         uint16_t exactLen = newLengths[i];
 
@@ -141,17 +140,17 @@ void ReconfigureLcdDma(uint16_t* newLengths) {
         strips[i]->Begin();
         strips[i]->ClearTo(RgbColor(0));
         
-        activeLengths[i] = exactLen; // Den neuen Status merken
+        activeLengths[i] = exactLen; // Remember the new status
     }
     
     ShowAll();
-    Serial.println("Hardware erfolgreich auf neues Tisch-Layout kalibriert!");
+    Serial.println("Hardware successfully calibrated to new desk layout!");
 }
 
 void setup() {
     Serial.begin(115200);
     pinMode(FREQ_OUT_PIN, OUTPUT);
-    // LEDs initialisieren
+    // Initialize LEDs
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
         strips[i] = new MyPixelBus(1100, pins[i]);
         strips[i]->Begin();
@@ -187,28 +186,28 @@ void setup() {
 
     #endif
 
-    // 1. Manueller Kaltstart für das W5500 Modul (Verhindert Abstürze beim Booten!)
+    // 1. Manual cold start for the W5500 module (Prevents crashes during boot!)
     pinMode(W5500_RST, OUTPUT);
     digitalWrite(W5500_RST, LOW);
     delay(10);
     digitalWrite(W5500_RST, HIGH);
     delay(150);
 
-    // 2. SPI Bus verbinden
+    // 2. Connect SPI bus
     SPI.begin(W5500_SCK, W5500_MISO, W5500_MOSI, -1);
     
-    // 3. Ethernet Chip Select Pin übergeben
+    // 3. Pass Ethernet chip select pin
     Ethernet.init(W5500_CS);
     
-    // 4. IP zuweisen
+    // 4. Assign IP
     Ethernet.begin(mac, local_ip);
     
-    // Warten bis das Kabel Kontakt hat
+    // Wait until the cable makes contact
     Serial.println("Warte auf Netzwerk-Link...");
     while (Ethernet.linkStatus() != LinkON) {
         delay(100);
     }
-    Serial.println("Netzwerk verbunden!");
+    Serial.println("Network connected!");
     
     udp.begin(6454);
     lastPacketTime = millis();
@@ -247,14 +246,14 @@ void loop() {
             for (int i = 0; i < NUM_STRIPS; i++) {
                 stripLengths[i] = (frameBuffer[1 + (i * 2)] << 8) | frameBuffer[2 + (i * 2)];
             
-            // Sobald auch nur ein Kanal abweicht, wissen wir: Neues Layout!
+            // As soon as even one channel deviates, we know: New layout!
                 if (stripLengths[i] != activeLengths[i]) {
                     layoutChanged = true;
                 }
             
             }
 
-            // 2. Wenn es ein neues Layout ist -> Hardware Reset feuern!
+            // 2. If it is a new layout -> trigger hardware reset!
             if (layoutChanged) {
                 ReconfigureLcdDma(stripLengths);
             }
