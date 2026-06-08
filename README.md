@@ -4,8 +4,8 @@ A high-performance, cost-effective, and fully automated "drop-in replacement" fo
 
 This framework utilizes the parallel DMA hardware of the ESP32-S3 to drive addressable LEDs on **up to 16 channels absolutely simultaneously**. Designed for extremely fluid lighting effects without stuttering, frame drops, or complex software configurations.
 
-![Hardware Prototype](https://via.placeholder.com/800x400.png?text=Insert+your+ESP32-S3+Hardware+Prototype+Image+Here)  
-*(Image: Our hardware prototype in action)*
+![Hardware Prototype](https://github.com/LSatan/ESP32-S3-VPinball-LED-Software/blob/main/img/hardware/esp32s3.png)  
+*(Image: Hardware prototype)*
 
 ---
 
