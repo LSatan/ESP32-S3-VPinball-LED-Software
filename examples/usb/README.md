@@ -38,9 +38,6 @@ const uint16_t stripLengths[ChannelCount] = { 144, 144, 300, 48, 0, 0, 0, 0, 0, 
 
 To utilize the Native USB speed and avoid serial bottlenecks, you must configure the Arduino IDE `Tools` menu exactly like this before flashing:
 
-![Arduino IDE Tools Settings](Screenshot_2026-06-08_205139.png)
-*(Please ensure your settings match this screenshot).*
-
 **Key Settings Checklist:**
 * **Board:** ESP32S3 Dev Module
 * **USB CDC On Boot:** `Enabled` *(CRITICAL: This routes the serial data directly through the fast native USB port!)*
@@ -61,6 +58,9 @@ Add a standard TeensyStripController to your DirectOutput configuration. Remembe
 <OutputControllers>
   <TeensyStripController>
     <Name>ESP32_Teensy_Replacement</Name>
-    <NumberOfLeds>2472</NumberOfLeds> <ComPortName>COM3</ComPortName> </TeensyStripController>
+    <NumberOfLeds>2472</NumberOfLeds>
+    <ComPortName>COM3</ComPortName>
+    <TestOnConnect>false</TestOnConnect>
+  </TeensyStripController>
 </OutputControllers>
 ```
