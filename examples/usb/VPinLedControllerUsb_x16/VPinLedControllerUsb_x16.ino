@@ -73,11 +73,10 @@ void canShow(){
 
 }
 
-    // Exakt alle 1000 Millisekunden (1 Sekunde) auswerten
+
 void UpdateFpsLed() {
-    // Diese Funktion wird jetzt direkt in der Hauptschleife aufgerufen, 
-    // am besten direkt nach dem Paket-Empfang.
-    
+    // This function is now called directly in the main loop.
+   
         unsigned long currentMillis = millis();
         lastPacketTime = currentMillis;
         frameCount++;
@@ -91,29 +90,29 @@ void UpdateFpsLed() {
 
         RgbColor fpsColor;
 
-        // Wenn dein 3-Sekunden-Timeout aktiv ist (0 FPS), LED ausmachen oder abdunkeln
+        // If your 3-second timeout is active (0 FPS), turn off the LED or dim it
         if (currentFps == 0) {
-            fpsColor = RgbColor(0, 0, 0); // Aus (Standby)
+            fpsColor = RgbColor(0, 0, 0); // Off (Standby)
         } 
-        // Die neue, feinere Skala:
+        // The RGB FPS Scale
         else if (currentFps < 20) {
-            fpsColor = RgbColor(255, 0, 0);       // Rot
+            fpsColor = RgbColor(255, 0, 0);       // Red
         } else if (currentFps >= 20 && currentFps <= 29) {
             fpsColor = RgbColor(255, 100, 0);     // Orange
         } else if (currentFps >= 30 && currentFps <= 39) {
-            fpsColor = RgbColor(255, 255, 0);     // Gelb (Aktuelles WLAN)
+            fpsColor = RgbColor(255, 255, 0);     // Yellow
         } else if (currentFps >= 40 && currentFps <= 49) {
-            fpsColor = RgbColor(100, 255, 0);     // Hellgrün
+            fpsColor = RgbColor(100, 255, 0);     // Light green
         } else if (currentFps >= 50 && currentFps <= 59) {
-            fpsColor = RgbColor(0, 255, 0);       // Dunkelgrün
+            fpsColor = RgbColor(0, 255, 0);       // Dark green
         } else if (currentFps >= 60 && currentFps <= 69) {
-            fpsColor = RgbColor(0, 255, 255);     // Cyan (Perfekt)
+            fpsColor = RgbColor(0, 255, 255);     // Cyan (Perfect)
         } else if (currentFps >= 70 && currentFps <= 89) {
-            fpsColor = RgbColor(0, 0, 255);       // Blau
+            fpsColor = RgbColor(0, 0, 255);       // Blue
         } else if (currentFps >= 90 && currentFps <= 119) {
-            fpsColor = RgbColor(148, 0, 211);     // Violett
+            fpsColor = RgbColor(148, 0, 211);     // Violet
         } else { 
-            fpsColor = RgbColor(255, 255, 255);   // Weiß (120+)
+            fpsColor = RgbColor(255, 255, 255);   // White (120+)
         }
 
         fpsLed.SetPixelColor(0, applyBrightness(fpsColor, fpsLedBrightness));
