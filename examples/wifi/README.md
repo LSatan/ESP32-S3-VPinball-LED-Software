@@ -51,7 +51,7 @@ When you connect your PC to the newly created ESP32-S3 WiFi network, Windows usu
 **To ensure DOF can send data to the ESP32:**
 1. Connect your PC to the ESP32's WiFi (Default SSID: `VPin_LED_Controller`, Password: `vpinpassword`).
 2. Open **Windows Defender Firewall with Advanced Security**.
-3. Create a new **Outbound Rule** (Ausgehende Regel).
+3. Create a new **Outbound Rule**.
 4. Select **Port** -> **UDP**.
 5. Specify the local and remote port: **`6454`** *(This is the default Art-Net/DOF port)*.
 6. Allow the connection for all network profiles (Domain, Private, Public).
@@ -60,11 +60,17 @@ When you connect your PC to the newly created ESP32-S3 WiFi network, Windows usu
 
 ---
 
-## ⚙️ Step 3: DOF Configuration (`cabinet.xml`)
+## ⚙️ Step 3: DOF Configuration & Custom DLLs
 
-To use this wireless protocol, you must place the compiled `FastUdpController.dll` (from our C# source code) into your DirectOutput plugin folder.
+⚠️ **IMPORTANT: Custom DOF DLL Replacement Required!**
+Because our `FastUdpController` is currently pending a Pull Request and is not yet included in the official DirectOutput release, you **must** replace your existing DOF DLLs with the modified ones provided in this package.
 
-Afterward, add the custom controller to your `cabinet.xml`. You only need to define the strips you actually use; you can delete or set unused strips to `0`.
+1. Locate the **DOF_x86** and **DOF_x64** folders provided in this project download.
+2. Navigate to your existing DirectOutput installation directory on your PC.
+3. Replace the original DLL files in your local `x86` and `x64` folders with our provided versions.
+*(Don't worry: Our DLLs are compiled directly from the latest official mjr source code branch. You won't lose any existing features!)*
+
+After replacing the DLLs, add the custom controller to your `cabinet.xml`. You only need to define the strips you actually use; you can delete or set unused strips to `0`.
 
 ```xml
 <OutputControllers>
