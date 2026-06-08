@@ -26,7 +26,7 @@ const uint8_t pins[NUM_STRIPS] = {
 // --- NETWORK CONFIG ---
 // Since the W5500 handles the network stack itself, it needs a MAC address:
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; 
-IPAddress local_ip(10, 10, 10, 100); 
+IPAddress local_ip(192, 168, 1, 201); 
 
 typedef NeoPixelBus<NeoGrbFeature, NeoEsp32LcdX16Ws2812xMethod> MyPixelBus;
 MyPixelBus* strips[NUM_STRIPS];
@@ -203,7 +203,7 @@ void setup() {
     Ethernet.begin(mac, local_ip);
     
     // Wait until the cable makes contact
-    Serial.println("Warte auf Netzwerk-Link...");
+    Serial.println("Waiting for network link...");
     while (Ethernet.linkStatus() != LinkON) {
         delay(100);
     }
