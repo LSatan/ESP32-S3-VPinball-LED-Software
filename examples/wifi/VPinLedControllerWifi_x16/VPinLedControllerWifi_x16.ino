@@ -8,17 +8,17 @@
 #define FREQ_OUT_PIN 2
 #define NUM_STRIPS 16
 
-// --- WLAN ACCESS POINT DATEN ---
+// --- WLAN ACCESS POINT DATA ---
 // So heißt das WLAN, das der ESP32 ausstrahlt:
 const char* ap_ssid = "VPin_LED_Controller";       
 const char* ap_password = "vpinpassword";
 
-// Feste IP-Adresse für den AP definieren
+// Define a fixed IP address for the AP
 IPAddress local_ip(192, 168, 4, 1);
 IPAddress gateway(192, 168, 4, 1);
 IPAddress subnet(255, 255, 255, 0);
 
-// --- DEINE HARDWARE PINS (ESP32-S3) ---
+// --- YOUR HARDWARE PINS (ESP32-S3) ---
 const uint8_t pins[NUM_STRIPS] = {
     1, 4, 5, 6, 7, 8, 9, 10, 11,    // Channels 0 to 7
     12, 13, 14, 15, 16, 17, 18      // Channels 8 to 15
@@ -68,9 +68,8 @@ void canShow(){
 }
 
 void UpdateFpsLed() {
-    // Diese Funktion wird jetzt direkt in der Hauptschleife aufgerufen, 
-    // am besten direkt nach dem Paket-Empfang.
-    
+    // This function is now called directly in the main loop.
+   
         unsigned long currentMillis = millis();
         lastPacketTime = currentMillis;
         frameCount++;
@@ -84,29 +83,29 @@ void UpdateFpsLed() {
 
         RgbColor fpsColor;
 
-        // Wenn dein 3-Sekunden-Timeout aktiv ist (0 FPS), LED ausmachen oder abdunkeln
+        // If your 1.5-second timeout is active (0 FPS), turn off or dim the LED
         if (currentFps == 0) {
-            fpsColor = RgbColor(0, 0, 0); // Aus (Standby)
+            fpsColor = RgbColor(0, 0, 0); // Off (Standby)
         } 
         // Die neue, feinere Skala:
         else if (currentFps < 20) {
-            fpsColor = RgbColor(255, 0, 0);       // Rot
+            fpsColor = RgbColor(255, 0, 0);       // Red
         } else if (currentFps >= 20 && currentFps <= 29) {
             fpsColor = RgbColor(255, 100, 0);     // Orange
         } else if (currentFps >= 30 && currentFps <= 39) {
-            fpsColor = RgbColor(255, 255, 0);     // Gelb (Aktuelles WLAN)
+            fpsColor = RgbColor(255, 255, 0);     // Yellow
         } else if (currentFps >= 40 && currentFps <= 49) {
-            fpsColor = RgbColor(100, 255, 0);     // Hellgrün
+            fpsColor = RgbColor(100, 255, 0);     // Light green
         } else if (currentFps >= 50 && currentFps <= 59) {
-            fpsColor = RgbColor(0, 255, 0);       // Dunkelgrün
+            fpsColor = RgbColor(0, 255, 0);       // Dark green
         } else if (currentFps >= 60 && currentFps <= 69) {
-            fpsColor = RgbColor(0, 255, 255);     // Cyan (Perfekt)
+            fpsColor = RgbColor(0, 255, 255);     // Cyan (Perfect)
         } else if (currentFps >= 70 && currentFps <= 89) {
-            fpsColor = RgbColor(0, 0, 255);       // Blau
+            fpsColor = RgbColor(0, 0, 255);       // Blue
         } else if (currentFps >= 90 && currentFps <= 119) {
-            fpsColor = RgbColor(148, 0, 211);     // Violett
+            fpsColor = RgbColor(148, 0, 211);     // Violet
         } else { 
-            fpsColor = RgbColor(255, 255, 255);   // Weiß (120+)
+            fpsColor = RgbColor(255, 255, 255);   // White (120+)
         }
 
         fpsLed.SetPixelColor(0, applyBrightness(fpsColor, fpsLedBrightness));
@@ -115,9 +114,9 @@ void UpdateFpsLed() {
 }
 
 void ReconfigureLcdDma(uint16_t* newLengths) {
-    Serial.println("Neues Frame-Layout erkannt! Starte Hardware-Reset...");
+    Serial.println("New frame layout detected! Starting hardware reset...");
 
-    // 1. RAM freigeben
+    // 1. Free up RAM
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
         if (strips[i] != nullptr) {
             delete strips[i];
@@ -134,17 +133,17 @@ void ReconfigureLcdDma(uint16_t* newLengths) {
         activeLengths[i] = exactLen;
     }
 
-    // 2. Sortieren mit std::sort und einer Lambda-Funktion
+    // 2. Sorting with std::sort and a lambda function
     std::sort(pinIndex, pinIndex + NUM_STRIPS, [](int a, int b) {
         return activeLengths[a] > activeLengths[b];
     });
     
     for(uint8_t k = 0; k < NUM_STRIPS; k++) {
-        // Speichert, an welcher Position 'k' der ursprüngliche Kanal gelandet ist
+        // Stores at which position 'k' the original channel ended up
         reverseIndex[pinIndex[k]] = k; 
     }
     
-    // 3. Streifen mit exakter Länge neu aufbauen
+    // 3. Rebuild strips with exact length
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
         strips[i] = new MyPixelBus(activeLengths[pinIndex[i]], pins[pinIndex[i]]);
         strips[i]->Begin();
@@ -154,9 +153,7 @@ void ReconfigureLcdDma(uint16_t* newLengths) {
 
 
     ShowAll();
-    Serial.println("Hardware erfolgreich auf neues Tisch-Layout kalibriert!");
-    //udp.begin(6454);
-    //while(udp.parsePacket()){udp.flush();}
+    Serial.println("Hardware successfully calibrated to new desk layout!");
 }
 
 void setup() {
@@ -197,26 +194,26 @@ void setup() {
 
     #endif
 
-    // --- 2. WLAN ACCESS POINT STARTEN ---
-    Serial.println("\nStarte Access Point Modus...");
+    // --- 2. START WLAN ACCESS POINT ---
+    Serial.println("\nStarting Access Point mode...");
 
     WiFi.disconnect(true,true);
-    // ESP32 in den AP-Modus versetzen
+    // Put ESP32 into AP mode
     WiFi.mode(WIFI_AP);
     
-    // Feste IP-Adresse zuweisen
+    // Assign a fixed IP address
     WiFi.softAPConfig(local_ip, gateway, subnet);
     
-    // Netzwerk aufspannen
+    // Set up a network
     WiFi.softAP(ap_ssid, ap_password);
 
-    Serial.print("WLAN-Netzwerk '");
+    Serial.print("Wi-Fi network '");
     Serial.print(ap_ssid);
-    Serial.println("' ist aktiv!");
-    Serial.print("IP-Adresse fuer DOF XML: ");
+    Serial.println("' is active!");
+    Serial.print("IP address for DOF XML: ");
     Serial.println(WiFi.softAPIP());
 
-    // --- 3. UDP STARTEN ---
+    // --- 3. START UDP ---
     udp.begin(6454);
     lastPacketTime = millis();
 }
@@ -254,14 +251,14 @@ void loop() {
             for (int i = 0; i < NUM_STRIPS; i++) {
                 stripLengths[i] = (frameBuffer[1 + (i * 2)] << 8) | frameBuffer[2 + (i * 2)];
             
-            // Sobald auch nur ein Kanal abweicht, wissen wir: Neues Layout!
+            // As soon as even one channel deviates, we know: New layout!
                 if (stripLengths[i] != activeLengths[i]) {
                     layoutChanged = true;
                 }
             
             }
 
-            // 2. Wenn es ein neues Layout ist -> Hardware Reset feuern!
+            // 2. If it is a new layout -> trigger hardware reset!
             if (layoutChanged) {
                 ReconfigureLcdDma(stripLengths);
             }
@@ -286,7 +283,6 @@ void loop() {
             canShow();
             ShowAll();            
             UpdateFpsLed();
-            //while(udp.parsePacket()){udp.flush();}
         }
     } 
     else if (!isStandby && (millis() - lastPacketTime > 1500)) {
