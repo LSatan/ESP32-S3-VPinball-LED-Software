@@ -1,6 +1,6 @@
 ﻿using System;
-using System.Net.Sockets;
 using System.Diagnostics;
+using System.Net.Sockets;
 using DirectOutput;
 using DirectOutput.Cab.Out;
 
@@ -8,8 +8,14 @@ namespace DirectOutput.Cab.Out.Network
 {
     public class FastUdpController : OutputControllerCompleteBase
     {
+        // --- GRUNDEINSTELLUNGEN ---
         public string IpAddress { get; set; } = "192.168.4.1";
         public int Port { get; set; } = 6454;
+
+        // --- HARDWARE HANDBREMSE ---
+        // true: Zieht nach 14KB dynamisch die Bremse (Ideal für W5500 Chips)
+        // false: Feuert ungebremst (Ideal für WLAN oder native Ethernet PHYs)
+        public bool SetW5500 { get; set; } = true;
 
         // --- DOF XML PROPERTIES ---
         public int NumberOfLedsStrip1 { get; set; } = 0;
@@ -34,15 +40,11 @@ namespace DirectOutput.Cab.Out.Network
         private int _headerSize = 33;
         private int _maxStrips = 16;
         private int _totalLeds = 0;
-        private int _longestStripLeds = 0; // Remembers the length of the longest strip
+        private int _longestStripLeds = 0;
 
-        // --- CHUNKING VARIABLES ---
+        // --- CHUNKING VARIABLEN ---
         private byte _frameId = 0;
         private const int MAX_PAYLOAD_SIZE = 1400;
-
-        // --- HARDWARE LATENCY STOPWATCH ---
-        private Stopwatch _hardwareRenderWatch = new Stopwatch();
-        private long _requiredRenderTicks = 0; // Dynamic lock time in CPU cycles
 
         protected override int GetNumberOfConfiguredOutputs()
         {
@@ -59,25 +61,19 @@ namespace DirectOutput.Cab.Out.Network
             for (int i = 0; i < _maxStrips; i++)
             {
                 _totalLeds += strips[i];
-                // Find the longest stripe for the latency calculation
                 if (strips[i] > _longestStripLeds) { _longestStripLeds = strips[i]; }
             }
-
-			// Calculate mathematically exact render time:
-			// 30 microseconds per LED microseconds WS2812 reset latch. (tuned to 0.2)
-            double renderTimeMs = (_longestStripLeds * 0.02);
-
-            // Convert to high-precision CPU ticks
-            _requiredRenderTicks = (long)(renderTimeMs * Stopwatch.Frequency / 1000.0);
 
             return _totalLeds * 3;
         }
 
-        protected override bool VerifySettings() { return true; }
+        protected override bool VerifySettings()
+        {
+            return true;
+        }
 
         protected override void ConnectToController()
         {
-            // Calls GetNumberOfConfiguredOutputs internally and calculates the ticks
             GetNumberOfConfiguredOutputs();
 
             int[] strips = new int[] {
@@ -97,43 +93,34 @@ namespace DirectOutput.Cab.Out.Network
             }
 
             _udpClient = new UdpClient();
-            _hardwareRenderWatch.Start(); // Starts the global surveillance clock
         }
 
         protected override void DisconnectFromController()
         {
-            _udpClient?.Close();
-            _udpClient = null;
+            if (_udpClient != null)
+            {
+                _udpClient.Close();
+                _udpClient = null;
+            }
         }
 
         protected override void UpdateOutputs(byte[] OutputValues)
         {
             if (OutputValues.Length == _totalLeds * 3)
             {
-				// --- 1. THE HARDWARE BRAKE (Busy-Wait BEFORE Sending) ---
-				// If the ESP32 is physically still busy with drawing the
-				// previous image, DOF MUST wait here.
-                while (_hardwareRenderWatch.ElapsedTicks < _requiredRenderTicks)
-                {
-                    // Wait until the physical LED clock has run out
-                }
-
-                // Restart clock immediately for the current frame
-                _hardwareRenderWatch.Restart();
-
-                // 2. Complete the large array in one go
+                // 1. Das große Array in einem Rutsch fertigstellen (Daten hinter den 33-Byte Header kopieren)
                 Buffer.BlockCopy(OutputValues, 0, _ledBuffer, _headerSize, OutputValues.Length);
 
-                // 3. Calculate how many snacks we need
+                // 2. Ausrechnen, wie viele Häppchen wir brauchen (inklusive Header)
                 int totalChunks = (int)Math.Ceiling((double)_ledBuffer.Length / MAX_PAYLOAD_SIZE);
+                if (totalChunks == 0) totalChunks = 1;
 
-                // --- SETUP FOR INTERNAL CHUNK BRAKE (For LAN) ---
                 Stopwatch sw = new Stopwatch();
                 int burstSize = 10;
-                long waitTicksBurst = (long)(4.0 * Stopwatch.Frequency / 1000.0); // 0.3 ms Pause zwischen Chunks
-                long waitTicksEnd = (long)(4.0 * Stopwatch.Frequency / 1000.0); // 4.0 ms Pause am Ende bei Riesenpaketen
+                double msPerChunk = 0.4;
+                int chunksInCurrentBurst = 0;
 
-                // 4. Pack and send snacks
+                // 3. Häppchen verpacken und senden
                 for (int i = 0; i < totalChunks; i++)
                 {
                     int offset = i * MAX_PAYLOAD_SIZE;
@@ -148,19 +135,38 @@ namespace DirectOutput.Cab.Out.Network
 
                     _udpClient.Send(chunk, chunk.Length, IpAddress, Port);
 
-                    // --- THE CHUNK HANDBRAKE ---
-                    if ((i + 1) % burstSize == 0 && (i + 1) < totalChunks)
+                    // --- DIE DYNAMISCHE W5500 CHUNK-HANDBREMSE ---
+                    if (SetW5500)
                     {
-                        sw.Restart();
-                        while (sw.ElapsedTicks < waitTicksBurst) { }
+                        chunksInCurrentBurst++;
+
+                        if (chunksInCurrentBurst == burstSize && (i + 1) < totalChunks)
+                        {
+                            long waitTicks = (long)(chunksInCurrentBurst * msPerChunk * Stopwatch.Frequency / 1000.0);
+                            sw.Restart();
+                            while (sw.ElapsedTicks < waitTicks) { }
+
+                            chunksInCurrentBurst = 0; // Zähler zurücksetzen
+                        }
                     }
                 }
 
                 _frameId++;
 
-                // 5. Pause after more than 10 chunks. (W5500 fix large packets)
-                if (totalChunks > burstSize)
+                // --- 4. END-OF-FRAME WARTEZEIT BERECHNEN ---
+                // Basis: Zeit für das Latching der LEDs (0.02ms pro LED am längsten Streifen)
+                double totalWaitTimeMs = _longestStripLeds * 0.02;
+
+                // Restzeit für W5500 addieren, falls aktiviert und Reste übrig sind
+                if (SetW5500 && totalChunks > burstSize && chunksInCurrentBurst > 0)
                 {
+                    totalWaitTimeMs += (chunksInCurrentBurst * msPerChunk);
+                }
+
+                // 5. Ein einziger, hoch effizienter Warte-Block für den Rest des Frames
+                if (totalWaitTimeMs > 0)
+                {
+                    long waitTicksEnd = (long)(totalWaitTimeMs * Stopwatch.Frequency / 1000.0);
                     sw.Restart();
                     while (sw.ElapsedTicks < waitTicksEnd) { }
                 }
