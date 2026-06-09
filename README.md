@@ -49,7 +49,7 @@ These tests show the physical limit of the system during massive, symmetrical ma
 | :--- | :--- | :--- | :--- | :--- |
 | **16 x 200 LEDs** | 3,200 | ~ 22 FPS | ~ 75 - 92 FPS | **~ 85 - 92 FPS** |
 | **16 x 300 LEDs** | 4,800 | ~ 15 FPS | ~ 45 - 58 FPS | **~ 60 FPS** |
-| **16 x 500 LEDs** | 8,000 | ~ 9 FPS | ~ 29 - 39 FPS | **~ 33 FPS** |
+| **16 x 500 LEDs** | 8,000 | ~ 9 FPS | ~ 29 - 39 FPS | **~ 38 FPS** |
 
 ### Real-World Test: Asymmetrical VPin Setup
 Very few pinball machines use symmetrical strips. This setup reflects a complex high-end cabinet:
