@@ -8,13 +8,13 @@ namespace DirectOutput.Cab.Out.Network
 {
     public class FastUdpController : OutputControllerCompleteBase
     {
-        // --- GRUNDEINSTELLUNGEN ---
+        // --- DEFAULT SETTINGS ---
         public string IpAddress { get; set; } = "192.168.4.1";
         public int Port { get; set; } = 6454;
 
-        // --- HARDWARE HANDBREMSE ---
-        // true: Zieht nach 14KB dynamisch die Bremse (Ideal für W5500 Chips)
-        // false: Feuert ungebremst (Ideal für WLAN oder native Ethernet PHYs)
+        // --- HARDWARE HANDBRAKE ---
+		// true: Dynamically engages the brake after 14KB (Ideal for W5500 chips)
+		// false: Fires unrestricted (Ideal for Wi-Fi or native Ethernet PHYs)
         public bool SetW5500 { get; set; } = true;
 
         // --- DOF XML PROPERTIES ---
@@ -42,7 +42,7 @@ namespace DirectOutput.Cab.Out.Network
         private int _totalLeds = 0;
         private int _longestStripLeds = 0;
 
-        // --- CHUNKING VARIABLEN ---
+        // --- CHUNKING VARIABLES ---
         private byte _frameId = 0;
         private const int MAX_PAYLOAD_SIZE = 1400;
 
@@ -108,10 +108,10 @@ namespace DirectOutput.Cab.Out.Network
         {
             if (OutputValues.Length == _totalLeds * 3)
             {
-                // 1. Das große Array in einem Rutsch fertigstellen (Daten hinter den 33-Byte Header kopieren)
+                // 1. Complete the large array in one go (copy data behind the 33-byte header)
                 Buffer.BlockCopy(OutputValues, 0, _ledBuffer, _headerSize, OutputValues.Length);
 
-                // 2. Ausrechnen, wie viele Häppchen wir brauchen (inklusive Header)
+                // 2. Calculate how many snacks we need (including header)
                 int totalChunks = (int)Math.Ceiling((double)_ledBuffer.Length / MAX_PAYLOAD_SIZE);
                 if (totalChunks == 0) totalChunks = 1;
 
@@ -120,7 +120,7 @@ namespace DirectOutput.Cab.Out.Network
                 double msPerChunk = 0.4;
                 int chunksInCurrentBurst = 0;
 
-                // 3. Häppchen verpacken und senden
+                // 3. Pack and send snacks
                 for (int i = 0; i < totalChunks; i++)
                 {
                     int offset = i * MAX_PAYLOAD_SIZE;
@@ -135,7 +135,7 @@ namespace DirectOutput.Cab.Out.Network
 
                     _udpClient.Send(chunk, chunk.Length, IpAddress, Port);
 
-                    // --- DIE DYNAMISCHE W5500 CHUNK-HANDBREMSE ---
+                    // --- THE DYNAMIC W5500 CHUNK HANDBRAKE ---
                     if (SetW5500)
                     {
                         chunksInCurrentBurst++;
@@ -146,24 +146,24 @@ namespace DirectOutput.Cab.Out.Network
                             sw.Restart();
                             while (sw.ElapsedTicks < waitTicks) { }
 
-                            chunksInCurrentBurst = 0; // Zähler zurücksetzen
+                            chunksInCurrentBurst = 0; // Reset counter
                         }
                     }
                 }
 
                 _frameId++;
 
-                // --- 4. END-OF-FRAME WARTEZEIT BERECHNEN ---
-                // Basis: Zeit für das Latching der LEDs (0.02ms pro LED am längsten Streifen)
+                // --- 4. CALCULATE END-OF-FRAME WAIT TIME---
+                // Basis: Time for the latching of the LEDs (0.02ms per LED on the longest strip)
                 double totalWaitTimeMs = _longestStripLeds * 0.02;
 
-                // Restzeit für W5500 addieren, falls aktiviert und Reste übrig sind
+                // Add remaining time for W5500 if activated and leftovers remain
                 if (SetW5500 && totalChunks > burstSize && chunksInCurrentBurst > 0)
                 {
                     totalWaitTimeMs += (chunksInCurrentBurst * msPerChunk);
                 }
 
-                // 5. Ein einziger, hoch effizienter Warte-Block für den Rest des Frames
+                // 5. A single, highly efficient wait block for the rest of the frame
                 if (totalWaitTimeMs > 0)
                 {
                     long waitTicksEnd = (long)(totalWaitTimeMs * Stopwatch.Frequency / 1000.0);
