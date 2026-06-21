@@ -64,7 +64,7 @@ Very few pinball machines use symmetrical strips. This setup reflects a complex 
 | :--- | :--- | :--- |
 | **Native USB** | ~ 28 FPS | Heavily fluctuating (USB Bottleneck) |
 | **WiFi (UDP)** | ~ 80 FPS | Stable, minimal drops during heavy interference |
-| **Ethernet (W5500)** | **~ 129 FPS** | **Rock-solid. No micro-stuttering.** |
+| **Ethernet (W5500)** | **~ 80 FPS** | **Rock-solid. No micro-stuttering.** |
 
 ---
 
