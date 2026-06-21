@@ -41,6 +41,8 @@ uint8_t frameBuffer[36000];
 uint8_t currentFrameId = 255;
 uint8_t chunksReceived = 0;
 uint16_t activeLengths[NUM_STRIPS] = {0};
+uint8_t pinIndex[NUM_STRIPS];
+uint8_t reverseIndex[NUM_STRIPS];
 
 unsigned long lastPacketTime = 0;
 bool isStandby = false;
@@ -71,9 +73,7 @@ void canShow(){
 }
 
 
-void UpdateFpsLed() {
-	// This function is now called directly in the main loop.
-    
+void UpdateFpsLed() {    
         unsigned long currentMillis = millis();
         lastPacketTime = currentMillis;
         frameCount++;
@@ -130,19 +130,32 @@ void ReconfigureLcdDma(uint16_t* newLengths) {
 
     delay(50); 
 
-    // 3. Rebuild strips with exact length
-    for(uint8_t i = 0; i < NUM_STRIPS; i++) {
+    for (int i = 0; i < NUM_STRIPS; i++) {
+        pinIndex[i] = i;
         uint16_t exactLen = newLengths[i];
+        uint16_t safeLen = (exactLen > 0) ? exactLen : 0;
+        activeLengths[i] = exactLen;
+    }
 
-        uint16_t safeLen = (exactLen > 0) ? exactLen : 0; 
-
-        strips[i] = new MyPixelBus(safeLen, pins[i]);
-        strips[i]->Begin();
-        strips[i]->ClearTo(RgbColor(0));
-        
-        activeLengths[i] = exactLen; // Remember the new status
+    // 2. Sorting with std::sort and a lambda function
+    std::sort(pinIndex, pinIndex + NUM_STRIPS, [](int a, int b) {
+        return activeLengths[a] > activeLengths[b];
+    });
+    
+    for(uint8_t k = 0; k < NUM_STRIPS; k++) {
+        // Stores at which position 'k' the original channel ended up
+        reverseIndex[pinIndex[k]] = k; 
     }
     
+    // 3. Rebuild strips with exact length
+    for(uint8_t i = 0; i < NUM_STRIPS; i++) {
+        strips[i] = new MyPixelBus(activeLengths[pinIndex[i]], pins[pinIndex[i]]);
+        strips[i]->Begin();
+        strips[i]->ClearTo(RgbColor(0)); 
+    }
+
+
+
     ShowAll();
     Serial.println("Hardware successfully calibrated to new desk layout!");
 }
@@ -203,7 +216,7 @@ void setup() {
     Ethernet.begin(mac, local_ip);
     
     // Wait until the cable makes contact
-    Serial.println("Waiting for network link...");
+    Serial.println("Warte auf Netzwerk-Link...");
     while (Ethernet.linkStatus() != LinkON) {
         delay(100);
     }
@@ -262,12 +275,13 @@ void loop() {
             for (int stripe = 0; stripe < NUM_STRIPS; stripe++) {
                 uint16_t currentLen = stripLengths[stripe];
                 if (currentLen > 0) {
+					uint8_t channel = reverseIndex[stripe];
                     for (int len = 0; len < currentLen; len++) {
                         uint8_t r = frameBuffer[byteIndex++];
                         uint8_t g = frameBuffer[byteIndex++];
                         uint8_t b = frameBuffer[byteIndex++];
 
-                        strips[stripe]->SetPixelColor(len, RgbColor(r, g, b));
+                        strips[channel]->SetPixelColor(len, RgbColor(r, g, b));
                     }
                 }
             }
