@@ -23,7 +23,7 @@ While the original Wemos firmware relies on the standard FastLED library, this E
 In older controllers or previous sketches, you had to manually enter your physical LED strip lengths into the Arduino code. **This is no longer necessary!**
 
 The ESP32-S3 now features a smart auto-detect mechanism. It analyzes the very first data frame sent by DOF, learns your exact setup (whether you use 2 or 16 channels, and their exact lengths), and automatically configures its internal hardware DMA buffers on the fly. 
-If you add or remove LEDs later, simply update your DOF config—the ESP32 will adapt automatically on the next boot.
+If you add or remove LEDs later, simply update your DOF config—the ESP32 will adapt automatically **the moment you start a table or restart DOF**. No hardware reboot required!
 
 ---
 
