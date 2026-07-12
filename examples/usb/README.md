@@ -27,9 +27,14 @@ If you add or remove LEDs later, simply update your DOF config—the ESP32 will 
 
 ---
 
-## ⚡ Compression Mode Supported
+## ⚡ Bulk Stream Mode & Compression (NEW)
 
-This sketch now fully supports DOF's built-in Color-based RLE Compression (`Q` command). By enabling this feature in the plugin, the USB payload size is drastically reduced. Combined with the LCD DMA engine, this ensures butter-smooth 60-120+ FPS even on gigantic setups. (depending on effects and longest strip)
+This sketch now supports two powerful features to maximize your framerates:
+
+1.  **Bulk Stream Mode (`EnableBulkMode`):** 
+    Instead of the classic ping-pong handshake (where DOF sends data for Strip 1, waits for an ACK, then sends Strip 2, waits, etc.), **Bulk Mode** packs the data for *all* your LED strips into a single, massive payload. This completely eliminates USB overhead latency and drastically increases the FPS for large cabinets with many channels.
+2.  **Color-based RLE Compression (`UseCompression`):**
+    Reduces the USB payload size heavily. Combined with Bulk Mode and the LCD DMA engine, this ensures butter-smooth 60-120+ FPS even on gigantic setups (depending on effects and longest strip).
 
 ---
 
@@ -52,6 +57,7 @@ To utilize the Native USB speed and avoid serial timeouts, you must configure th
 
 Add the `WemosD1MPStripController` to your DirectOutput configuration. 
 * `Enable16ChannelMode`: Set to `true` to unlock pins 11-16.
+* `EnableBulkMode`: Set to `true` to enable single-payload streaming (requires the latest custom DOF .dll).
 * `UseCompression`: Set to `true` for maximum performance.
 * `SendPerLedstripLength`: Can safely be `false` because of the S3's smart auto-detect.
 
@@ -60,16 +66,20 @@ Add the `WemosD1MPStripController` to your DirectOutput configuration.
   <WemosD1MPStripController>
     <Name>ESP32_S3_Controller</Name>
     <ComPortName>COM3</ComPortName> <!-- Change to your COM Port -->
-    <ComPortTimeOutMs>300</ComPortTimeOutMs>
+    <ComPortTimeOutMs>50</ComPortTimeOutMs> <!-- Reduced from 300ms for Soft-Fail Architecture -->
     <ComPortBaudRate>2000000</ComPortBaudRate>
     <ComPortOpenWaitMs>300</ComPortOpenWaitMs>
     <ComPortHandshakeStartWaitMs>100</ComPortHandshakeStartWaitMs>
     <ComPortHandshakeEndWaitMs>100</ComPortHandshakeEndWaitMs>
     <SendPerLedstripLength>false</SendPerLedstripLength> <!-- We leave it on false, the controller automatically detects the strip length. -->
+    
+    <!-- NEW ESP32-S3 FEATURES -->
     <UseCompression>true</UseCompression>
-    <ComPortDtrEnable>false</ComPortDtrEnable> <!-- We'll leave it on false, we don't need a DTR reset. -->
+    <EnableBulkMode>true</EnableBulkMode>
+    <Enable16ChannelMode>true</Enable16ChannelMode>
+    
+    <ComPortDtrEnable>false</ComPortDtrEnable> <!-- We'll leave it on false, no longer needed due to Watchdog. -->
     <TestOnConnect>false</TestOnConnect>
-    <Enable16ChannelMode>true</Enable16ChannelMode> <!-- NEW ESP32-S3 FEATURES -->
 
     <!-- DEFINE YOUR STRIPS HERE (0 or not specified = Disabled) -->
     <NumberOfLedsStrip1>144</NumberOfLedsStrip1>
