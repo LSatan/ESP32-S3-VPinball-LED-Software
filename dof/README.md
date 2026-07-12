@@ -47,3 +47,34 @@ Here is an example of how a user configures this controller in their cabinet set
 ```
 
 This addition is completely isolated, does not interfere with existing serial/Teensy implementations, and provides a much-needed robust network alternative for modern VPin builds.
+
+
+------------------------------------------------------------
+
+**Title:** Feature & Resilience Update: ESP32-S3 Support, Bulk Streaming, and Universal High-Availability Watchdog for WemosD1MPStripController
+
+**Description:**
+
+This pull request introduces a massive performance and resilience overhaul to the `WemosD1MPStripController` class. It adds support for the ESP32-S3 architecture (up to 16 channels, bulk data streaming) and completely refactors the hardware communication layer to prevent thread crashes caused by transient Windows USB latency or electromagnetic interference (EMI). **The resilience updates apply to ALL controllers using this class (ESP8266, ESP32-S2, ESP32-S3, Teensy).**
+
+### ✨ New Features (S3 / Custom Firmware specific)
+
+* **16-Channel ESP32-S3 Support:** Added properties to unlock channels 11 through 16 for high-end setups, while maintaining 100% backward compatibility with standard 10-channel Wemos D1 setups.
+
+* **Bulk Stream Mode (`EnableBulkMode`):** Replaces the sequential, per-strip ping-pong handshake with a highly efficient, single-payload stream (`W` command). In classic mode, updating e.g. 8 channels adds ~8ms of pure USB overhead (approx. 1ms per channel just for the ACK roundtrip and waiting for the next strip's data), plus the additional delay of the final 'O' (latch) command. Bulk mode completely eliminates this latency by packing the entire cabinet's data into one payload, drastically increasing FPS for large cabinets.
+
+### 🛡️ Universal High-Availability & Resilience Architecture (Applies to all Hardware)
+
+Historically, the plugin handled *any* missed serial ACK (even due to a 2ms Windows CPU spike) by throwing a fatal `TimeoutException`, killing the updater thread, and attempting a full controller re-initialization. This caused visible stuttering or permanent LED freezing. This PR introduces a modern, fault-tolerant approach:
+
+* **Streaming Soft-Fail Mitigation:** Missing an ACK (`A`) after a data frame (`W`, `Q`, `O`) no longer crashes the thread. Instead, the timeout is gracefully caught, the COM port buffers are aggressively purged (`DiscardInBuffer`), and the thread immediately proceeds to the next frame. A dropped frame at 90+ FPS is invisible to the human eye; a full thread crash is not.
+
+* **Optimized Timeouts:** R/W timeouts have been reduced to `50ms` (down from 300ms). This safely accommodates microcontroller DMA reinitialization windows while ensuring that skipped frames due to Windows background tasks do not cause noticeable physical stutters in the cabinet.
+
+* **Hardware Watchdog (EMI & COM-Port Drop Protection):** In a real pinball cabinet, electromagnetic interference (EMI) from contactors or USB hub glitches can cause the virtual COM port to drop for a split second. This triggers a fatal `IOException`. The new Watchdog layer catches this and initiates an intelligent auto-reconnect routine. It will make **5 attempts over a 15-second window** to reclaim the port, resend the `Z` setup configuration, and seamlessly resume the render loop. It is so robust that you can literally unplug the controller during gameplay, plug it back in, and the LEDs will resume instantly.
+
+### 💡 Why this deprecates the "DTR Reset" workaround for ESP32-S2/S3
+
+Previously, users of ESP32-S2 and ESP32-S3 (native USB CDC) were advised to use `DTR=true` to force a hardware/USB stack reset upon reconnection when a frame was dropped.
+**This is no longer necessary or recommended.** Tearing down a perfectly healthy physical connection and resetting the microcontroller just because Windows delayed an ACK caused massive lag spikes and blackouts. By implementing the Soft-Fail architecture, the connection remains established, the microcontroller stays in its fast-loop, and transient desynchronizations are handled purely via buffer purging.
+
