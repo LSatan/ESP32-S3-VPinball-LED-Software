@@ -1,7 +1,7 @@
 #include <VPinLedControllerUsb.h>
 
 #define FirmwareVersionMajor 3
-#define FirmwareVersionMinor 0
+#define FirmwareVersionMinor 1
 
 // --- FEATURE SWITCH ---
 #define ENABLE_LED_TEST 1 
@@ -15,7 +15,7 @@
 uint16_t stripLengths[NUM_STRIPS] = {0}; 
 uint16_t tempLengths[NUM_STRIPS] = {0};  
 
-// --- YOUR HARDWARE PINS (ESP32-S3) ---
+// --- Your HARDWARE PINS (ESP32-S3) ---
 const uint8_t pins[NUM_STRIPS] = {
     1, 4, 5, 6, 7, 15, 16, 17, 18,    // Channels 0 to 7
     8, 9, 10, 11, 12, 13, 14      // Channels 8 to 15
@@ -39,6 +39,7 @@ uint8_t reverseIndex[NUM_STRIPS];
 
 unsigned long lastPacketTime = 0;
 bool isStandby = false;
+bool resetStripes = false;
 unsigned long lastFpsTime = 0;
 int frameCount = 0;
 
@@ -47,8 +48,13 @@ RgbColor applyBrightness(RgbColor color, uint8_t brightness) {
 }
 
 void Ack() {
-    while (!Serial); 
-    Serial.write('A');
+    while (!Serial);
+    uint8_t ackRetries = 0;
+    while (Serial.write('A') == 0 && ackRetries < 50) {
+        delayMicroseconds(100);
+        yield();
+        ackRetries++;
+    }
 }
 
 void ShowAll() {
@@ -105,7 +111,7 @@ void ReconfigureLcdDma(uint16_t* newLengths) {
             strips[i] = nullptr;
         }
     }
-    delay(50); 
+    delay(20); 
 
     for (int i = 0; i < NUM_STRIPS; i++) {
         pinIndex[i] = i;
@@ -137,7 +143,8 @@ void setup() {
     Serial.setRxBufferSize(BufferSize);
     Serial.begin(2000000);
     pinMode(FREQ_OUT_PIN, OUTPUT);
-    Serial.setTimeout(1000); 
+    Serial.setTimeout(100);
+    Serial.setTxTimeoutMs(0);
 
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
         strips[i] = new MyPixelBus(dofBlockSize, pins[i]);
@@ -192,6 +199,12 @@ void loop() {
                 break;
             case 'Z': 
                 {
+                    if (!resetStripes){
+                        for(uint8_t i = 0; i < NUM_STRIPS; i++) {
+                            tempLengths[i] = 0; 
+                        }
+                        resetStripes = true;
+                    }
                     uint8_t buf[4];
                     if (Serial.readBytes(buf, 4) == 4) {
                         uint8_t indexStrip = buf[0];
@@ -200,6 +213,30 @@ void loop() {
                             tempLengths[indexStrip] = stripLen; 
                         }
                     }
+                }
+                break;
+            case 'W':
+                {
+                if (!ReceiveBulkData()) {
+                    while(Serial.available()) Serial.read(); 
+                }
+                digitalWrite(FREQ_OUT_PIN, HIGH);
+                bool layoutChanged = false;
+                for (int i = 0; i < NUM_STRIPS; i++) {
+                    if (tempLengths[i] != stripLengths[i]) {
+                        layoutChanged = true;
+                        stripLengths[i] = tempLengths[i];
+                    }
+                }
+                if (layoutChanged) {
+                    ReconfigureLcdDma(stripLengths);
+                } else {
+                    canShow();
+                    ShowAll();
+                }
+                resetStripes = false;
+                UpdateFpsLed();
+                digitalWrite(FREQ_OUT_PIN, LOW);
                 }
                 break;
             case 'F': 
@@ -235,7 +272,7 @@ void loop() {
                         canShow();
                         ShowAll();
                     }
-                    
+                    resetStripes = false;
                     UpdateFpsLed();
                     digitalWrite(FREQ_OUT_PIN, LOW);
                 }
@@ -339,7 +376,7 @@ bool ReceiveCompressedData() {
     uint16_t firstLed = (head[0] << 8) | head[1];
     uint16_t numCompressedData = (head[2] << 8) | head[3];
 
-    // Jedes komprimierte Paket besteht aus 4 Bytes (1 Byte Länge + 3 Bytes RGB)
+	// Each compressed packet consists of 4 bytes (1 byte length + 3 bytes RGB)
     size_t bytesToRead = numCompressedData * 4;
     if (bytesToRead > sizeof(rgbDataBuffer)) return false;
     if (Serial.readBytes(rgbDataBuffer, bytesToRead) != bytesToRead) return false;
@@ -347,7 +384,6 @@ bool ReceiveCompressedData() {
     uint16_t dofIndex = firstLed;
     uint16_t channel = dofIndex / ReceivedSize;
     uint16_t ledIndex = dofIndex % ReceivedSize;
-    uint16_t ledcount = 0;
     size_t bufIdx = 0;
 
     for (uint16_t pack = 0; pack < numCompressedData; pack++) {
@@ -361,10 +397,69 @@ bool ReceiveCompressedData() {
             if (channel < NUM_STRIPS && ledIndex < stripLengths[channel]) {
                 strips[reverseIndex[channel]]->SetPixelColor(ledIndex, RgbColor(r, g, b));
             }
-            ledcount++;
             ledIndex++;
         }
     }
-    if (ledcount != tempLengths[channel]) tempLengths[channel] = ledcount;
+    if (ledIndex != tempLengths[channel]) tempLengths[channel] = ledIndex;
     return true;
 }
+
+
+bool ReceiveBulkData() {
+    uint8_t head[3];
+    if (Serial.readBytes(head, 3) != 3) return false; 
+    
+    uint8_t useCompression = head[0];
+    uint16_t packetSize = (head[1] << 8) | head[2];
+
+    size_t bytesToRead = packetSize * (3 + useCompression);
+    if (bytesToRead > sizeof(rgbDataBuffer)) return false;
+    if (Serial.readBytes(rgbDataBuffer, bytesToRead) != bytesToRead) return false;
+
+    uint16_t channel = 0;
+    uint16_t ledIndex = 0;
+    size_t bufIdx = 0;
+
+    if (useCompression) {
+        for (uint16_t pack = 0; pack < packetSize; pack++) {
+            uint8_t nbLeds = rgbDataBuffer[bufIdx++];
+            uint8_t r = rgbDataBuffer[bufIdx++];
+            uint8_t g = rgbDataBuffer[bufIdx++];
+            uint8_t b = rgbDataBuffer[bufIdx++];
+    
+            for (uint8_t numLed = 0; numLed < nbLeds; numLed++) {
+
+                while (channel < NUM_STRIPS && ledIndex >= stripLengths[channel]) {
+                    channel++;
+                    ledIndex = 0;
+                }
+
+                if (channel < NUM_STRIPS) {
+                    strips[reverseIndex[channel]]->SetPixelColor(ledIndex, RgbColor(r, g, b));
+                    ledIndex++;
+                }
+            }
+        }
+    } else {
+        for (uint16_t i = 0; i < packetSize; i++) {
+            uint8_t r = rgbDataBuffer[bufIdx++];
+            uint8_t g = rgbDataBuffer[bufIdx++];
+            uint8_t b = rgbDataBuffer[bufIdx++];
+        
+            while (channel < NUM_STRIPS && ledIndex >= stripLengths[channel]) {
+                channel++;
+                ledIndex = 0;
+            }
+
+            if (channel < NUM_STRIPS) {
+                strips[reverseIndex[channel]]->SetPixelColor(ledIndex, RgbColor(r, g, b));
+                ledIndex++;
+            }
+        }
+    }
+    return true;
+}
+
+
+
+
