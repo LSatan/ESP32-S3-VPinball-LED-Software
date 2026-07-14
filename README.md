@@ -1,4 +1,5 @@
 # 🚀 ESP32-S3 Ultimate VPin LED Controller (All-in-One Framework)
+# Attention! The frame rates for the USB example are no longer up to date. The update rate has improved massively. When I have taken new measurements, I will update the table.
 
 A high-performance, cost-effective, and fully automated "drop-in replacement" for the classic Teensy controller in Virtual Pinball (VPin) cabinets. 
 
