@@ -55,7 +55,7 @@ To utilize the Native USB speed and avoid serial timeouts, you must configure th
 
 ## ⚙️ Step 3: DOF Configuration (`cabinet.xml`)
 
-Add the `WemosD1MPStripController` to your DirectOutput configuration. 
+Add the `Esp32S3StripController` to your DirectOutput configuration. 
 * `Enable16ChannelMode`: Set to `true` to unlock pins 11-16.
 * `EnableBulkMode`: Set to `true` to enable single-payload streaming (requires the latest custom DOF .dll).
 * `UseCompression`: Set to `true` for maximum performance.
@@ -63,7 +63,7 @@ Add the `WemosD1MPStripController` to your DirectOutput configuration.
 
 ```xml
 <OutputControllers>
-  <WemosD1MPStripController>
+  <Esp32S3StripController>
     <Name>ESP32_S3_Controller</Name>
     <ComPortName>COM3</ComPortName> <!-- Change to your COM Port -->
     <ComPortTimeOutMs>50</ComPortTimeOutMs> <!-- Reduced from 300ms for Soft-Fail Architecture -->
@@ -98,6 +98,6 @@ Add the `WemosD1MPStripController` to your DirectOutput configuration.
     <NumberOfLedsStrip14>0</NumberOfLedsStrip14>
     <NumberOfLedsStrip15>0</NumberOfLedsStrip15>
     <NumberOfLedsStrip16>0</NumberOfLedsStrip16>
-  </WemosD1MPStripController>
+  </Esp32S3StripController>
 </OutputControllers>
 ```
