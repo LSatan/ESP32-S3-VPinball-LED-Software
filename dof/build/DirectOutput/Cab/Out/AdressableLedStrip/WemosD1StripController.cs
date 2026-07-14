@@ -3,30 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using System.IO;
+using System.Threading.Tasks;
 
 namespace DirectOutput.Cab.Out.AdressableLedStrip
 {
     /// <summary>
-    /// ESP32-S3 16-Channel & Bulk Stream Extension:
-    /// This controller class has been expanded to support ESP32-S3 boards, which can drive up to 16 independent LED strips.
-    /// By default, it operates in a strict 10-channel mode to ensure 100% backward compatibility with standard Wemos hardware.
-    /// 
-    /// New Features:
-    /// - Enable16ChannelMode: Unlocks channels 11 through 16.
-    /// - EnableBulkMode: Replaces the per-strip ping-pong handshake with a single, highly efficient stream-based transfer ('W' command).
-    /// 
-    /// Resilience Upgrades:
-    /// - Streaming Soft-Fail Architecture: Prevents thread crashes on missing ACKs ('W', 'Q', 'R', 'O' commands) due to transient Windows CPU spikes.
-    /// - Adaptive High-Speed Timeouts: Timeout values optimized to 70ms to safely accommodate microcontroller DMA reinitialization windows.
-    /// - Proactive Buffer Purging: Cleans virtual COM-port memory windows before frames to prevent ghost-byte desynchronization.
-    /// - Automated Hot-Plug Recovery: Full hardware watchdog loop that survives physical cable pulling by trying 5 re-initializations over 15 seconds.
-    /// 
-    /// For the compatible ESP32-S3 firmware, visit: <a target="_blank" href="https://github.com/LSatan/ESP32-S3-VPinball-LED-Software">LSatan's ESP32-S3 VPinball LED Software</a>
-    /// 
-    /// ---------------------------------------------------------------------------------------------------------
-    /// ORIGINAL WEMOS D1 MINI PRO IMPLEMENTATION:
-    /// 
     /// The WemosD1MPStripController is a Teensy equivalent board called Wemos D1 Mini Pro (also known as ESP8266), it's cheaper than the Teensy and can support the same amount of Ledstrip and leds per strip.
     /// 
     /// \image html wemos-d1-mini-pro.jpg
@@ -36,68 +17,35 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
     /// You can also find a tutorial (in french for now) explaining the flashing process for the Wemos D1 Mini Pro using these firmware <a target="_blank" href="https://shop.arnoz.com/laboratoire/2019/10/29/flasher-unewemos-d1-mini-pro-pour-lutiliser-dans-son-pincab/">Arnoz' lab Wemos D1 flashing tutorial</a>
     /// 
     /// There is a great online tool to setup easily both Teensy and Wemos D1 based ledstrips (an english version is also available) <a target="_blank" href="https://shop.arnoz.com/laboratoire/2020/09/17/cacabinet-generator/">Arnoz' cacabinet generator</a>
+    /// 
     /// </summary>
     public class WemosD1MPStripController : TeensyStripController
     {
-        public WemosD1MPStripController()
-        {
-            NumberOfLedsPerStrip = new int[16];
-        }
-
-        private bool _Enable16ChannelMode = false;
-        public bool Enable16ChannelMode
-        {
-            get { return _Enable16ChannelMode; }
-            set { _Enable16ChannelMode = value; }
-        }
-
-        private bool _EnableBulkMode = false;
-        public bool EnableBulkMode
-        {
-            get { return _EnableBulkMode; }
-            set { _EnableBulkMode = value; }
-        }
-
-        // --- NEW CHANNELS 11 TO 16 ---
-        public int NumberOfLedsStrip11
-        {
-            get { return NumberOfLedsPerStrip[10]; }
-            set { NumberOfLedsPerStrip[10] = value; base.SetupOutputs(); }
-        }
-        public int NumberOfLedsStrip12
-        {
-            get { return NumberOfLedsPerStrip[11]; }
-            set { NumberOfLedsPerStrip[11] = value; base.SetupOutputs(); }
-        }
-        public int NumberOfLedsStrip13
-        {
-            get { return NumberOfLedsPerStrip[12]; }
-            set { NumberOfLedsPerStrip[12] = value; base.SetupOutputs(); }
-        }
-        public int NumberOfLedsStrip14
-        {
-            get { return NumberOfLedsPerStrip[13]; }
-            set { NumberOfLedsPerStrip[13] = value; base.SetupOutputs(); }
-        }
-        public int NumberOfLedsStrip15
-        {
-            get { return NumberOfLedsPerStrip[14]; }
-            set { NumberOfLedsPerStrip[14] = value; base.SetupOutputs(); }
-        }
-        public int NumberOfLedsStrip16
-        {
-            get { return NumberOfLedsPerStrip[15]; }
-            set { NumberOfLedsPerStrip[15] = value; base.SetupOutputs(); }
-        }
-
         private bool _SendPerLedstripLength = false;
+
+        /// <summary>
+        /// Set if the controller will send per ledstrip length commands during the handshake.
+        /// </summary>
+        /// <value>
+        /// true if the commands are sent
+        /// </value>
         public bool SendPerLedstripLength
         {
             get { return _SendPerLedstripLength; }
-            set { _SendPerLedstripLength = value; }
+            set
+            {
+                _SendPerLedstripLength = value;
+            }
         }
 
         private bool _UseCompression = false;
+
+        /// <summary>
+        /// Use a simple colorbased RLE compression on each ledstrip data when sent
+        /// </summary>
+        /// <value>
+        /// true, use the compression when it worth it
+        /// </value>
         public bool UseCompression
         {
             get { return _UseCompression; }
@@ -105,6 +53,13 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
         }
 
         private bool _TestOnConnect = false;
+
+        /// <summary>
+        /// Ask the Wemos to make a simple RGB led test when connecting
+        /// </summary>
+        /// <value>
+        /// true, will ask for the test at connection stage
+        /// </value>
         public bool TestOnConnect
         {
             get { return _TestOnConnect; }
@@ -119,66 +74,31 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
 
             base.SetupController();
 
-            int maxChannels = Enable16ChannelMode ? 16 : 10;
-            int activeStrips = Math.Min(NumberOfLedsPerStrip.Length, maxChannels);
-
-            // Set firm hardware configuration timeouts slightly higher for safe initial handwriting
-            ComPort.ReadTimeout = 150;
-            ComPort.WriteTimeout = 150;
-
-            if (SendPerLedstripLength || EnableBulkMode)
+            //Send number of leds per leds strips 
+            if (SendPerLedstripLength)
             {
-                for (var numled = 0; numled < activeStrips; ++numled)
+                for (var numled = 0; numled < NumberOfLedsPerStrip.Length; ++numled)
                 {
                     int nbleds = NumberOfLedsPerStrip[numled];
                     if (nbleds > 0)
                     {
-                        int setupRetries = 3;
-                        bool setupSuccess = false;
-
-                        while (setupRetries > 0 && !setupSuccess)
+                        CommandData = new byte[5] { (byte)'Z', (byte)numled, (byte)(NumberOfLedsPerStrip.Length - 1), (byte)(nbleds >> 8), (byte)(nbleds & 255) };
+                        Log.Write($"Resize ledstrip {numled} to {nbleds} leds.");
+                        ComPort.Write(CommandData, 0, 5);
+                        ReceiveData = new byte[1];
+                        BytesRead = -1;
+                        try
                         {
-                            try
-                            {
-                                // Proactively purge buffers before critical init sequence commands
-                                if (ComPort.BytesToRead > 0)
-                                {
-                                    ComPort.DiscardInBuffer();
-                                }
-
-                                CommandData = new byte[5] { (byte)'Z', (byte)numled, (byte)(activeStrips - 1), (byte)(nbleds >> 8), (byte)(nbleds & 255) };
-                                Log.Write($"Resize ledstrip {numled} to {nbleds} leds. (Attempts remaining: {setupRetries})");
-                                ComPort.Write(CommandData, 0, 5);
-
-                                ReceiveData = new byte[1];
-                                BytesRead = ReadPortWait(ReceiveData, 0, 1);
-
-                                if (BytesRead == 1 && ReceiveData[0] == (byte)'A')
-                                {
-                                    setupSuccess = true;
-                                }
-                                else
-                                {
-                                    setupRetries--;
-                                    Log.Write($"Warning: Init ACK invalid for channel {numled}. Retrying...");
-                                    Thread.Sleep(50);
-                                }
-                            }
-                            catch (TimeoutException)
-                            {
-                                setupRetries--;
-                                Log.Write($"Warning: Timeout during setup handshake for channel {numled}. Retrying...");
-                                Thread.Sleep(50);
-                            }
-                            catch (Exception E)
-                            {
-                                throw new Exception($"Fatal exception encountered during structural hardware initialization of channel {numled}.", E);
-                            }
+                            BytesRead = ReadPortWait(ReceiveData, 0, 1);
+                        }
+                        catch (Exception E)
+                        {
+                            throw new Exception($"Expected 1 bytes after setting the number of leds for ledstrip {numled} , but the read operation resulted in a exception. Will not send data to the controller.", E);
                         }
 
-                        if (!setupSuccess)
+                        if (BytesRead != 1 || ReceiveData[0] != (byte)'A')
                         {
-                            throw new Exception($"Critical: The controller failed to acknowledge the configuration payload ('Z') for channel {numled} after 3 attempts.");
+                            throw new Exception($"Expected a Ack (A) after setting the number of leds for ledstrip {numled}, but received no answer or a unexpected answer ({(char)ReceiveData[0]}). Will not send data to the controller.");
                         }
                     }
                 }
@@ -187,8 +107,10 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
             if (TestOnConnect)
             {
                 CommandData = new byte[1] { (byte)'T' };
-                Log.Write("Send a test request to the controller");
+                Log.Write($"Send a test request to the controller");
                 ComPort.Write(CommandData, 0, 1);
+
+                //Temporary wait before asking the Ack
                 Thread.Sleep(2000);
 
                 ReceiveData = new byte[1];
@@ -199,288 +121,27 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
                 }
                 catch (Exception E)
                 {
-                    throw new Exception("Expected 1 bytes after requesting a test sequence.", E);
+                    throw new Exception($"Expected 1 bytes after requesting a test sequence, but the read operation resulted in a exception. Will not send data to the controller.", E);
                 }
 
                 if (BytesRead != 1 || ReceiveData[0] != (byte)'A')
                 {
-                    throw new Exception("Expected a Ack (A) after requesting a test sequence.");
+                    throw new Exception($"Expected a Ack (A) after requesting a test sequence, but received no answer or a unexpected answer ({(char)ReceiveData[0]}). Will not send data to the controller.");
                 }
 
                 TestOnConnect = false;
             }
+
         }
 
         protected List<byte> CompressedData = new List<byte>();
         protected List<byte> UncompressedData = new List<byte>();
 
-        protected override void UpdateOutputs(byte[] OutputValues)
-        {
-            if (ComPort == null)
-            {
-                throw new Exception("Comport is not initialized");
-            }
-
-            byte[] CommandData;
-            byte[] AnswerData;
-            int BytesRead;
-            int maxChannels = Enable16ChannelMode ? 16 : 10;
-
-            try
-            {
-                // Enforce active runtime transmission configuration
-                ComPort.ReadTimeout = 70;
-                ComPort.WriteTimeout = 70;
-
-                // -----------------------------------------------------------------
-                // STREAM-BASED BULK TRANSFER MODE ('W')
-                // -----------------------------------------------------------------
-                if (EnableBulkMode)
-                {
-                    UncompressedData.Clear();
-                    int sourcePosition = 0;
-
-                    for (int i = 0; i < maxChannels; i++)
-                    {
-                        int NrOfLedsOnStrip = NumberOfLedsPerStrip[i];
-                        if (NrOfLedsOnStrip > 0)
-                        {
-                            UncompressedData.AddRange(OutputValues.Skip(sourcePosition * 3).Take(NrOfLedsOnStrip * 3));
-                            sourcePosition += NrOfLedsOnStrip;
-                        }
-                    }
-
-                    if (UncompressedData.Count > 0)
-                    {
-                        byte[] dataToSend;
-                        byte isCompressedFlag = 0;
-                        ushort packetSize = 0;
-
-                        if (UseCompression)
-                        {
-                            CompressedData.Clear();
-                            List<byte> tempUncompressed = new List<byte>(UncompressedData);
-
-                            while (tempUncompressed.Count > 0)
-                            {
-                                if (tempUncompressed.Count == 3)
-                                {
-                                    CompressedData.Add(1);
-                                    CompressedData.Add(tempUncompressed[0]);
-                                    CompressedData.Add(tempUncompressed[1]);
-                                    CompressedData.Add(tempUncompressed[2]);
-                                    tempUncompressed.RemoveRange(0, 3);
-                                }
-                                else
-                                {
-                                    byte r = tempUncompressed[0];
-                                    byte g = tempUncompressed[1];
-                                    byte b = tempUncompressed[2];
-                                    tempUncompressed.RemoveRange(0, 3);
-                                    int value = (r << 16) | (g << 8) | b;
-                                    int cnt = 1;
-                                    while (tempUncompressed.Count > 0 && ((tempUncompressed[0] << 16) | (tempUncompressed[1] << 8) | tempUncompressed[2]) == value && cnt < byte.MaxValue - 1)
-                                    {
-                                        tempUncompressed.RemoveRange(0, 3);
-                                        cnt++;
-                                    }
-                                    CompressedData.Add((byte)cnt);
-                                    CompressedData.Add(r);
-                                    CompressedData.Add(g);
-                                    CompressedData.Add(b);
-                                }
-                            }
-                            dataToSend = CompressedData.ToArray();
-                            isCompressedFlag = 1;
-                            packetSize = (ushort)(CompressedData.Count / 4);
-                        }
-                        else
-                        {
-                            dataToSend = UncompressedData.ToArray();
-                            isCompressedFlag = 0;
-                            packetSize = (ushort)(UncompressedData.Count / 3);
-                        }
-
-                        byte[] bulkHeader = new byte[4] {
-                            (byte)'W',
-                            isCompressedFlag,
-                            (byte)(packetSize >> 8),
-                            (byte)(packetSize & 255)
-                        };
-
-                        // Clean out unexpected pre-existing hardware buffer remainders
-                        try
-                        {
-                            if (ComPort.BytesToRead > 0)
-                            {
-                                ComPort.DiscardInBuffer();
-                            }
-                        }
-                        catch { }
-
-                        ComPort.Write(bulkHeader, 0, 4);
-                        ComPort.Write(dataToSend, 0, dataToSend.Length);
-
-                        BytesRead = -1;
-                        AnswerData = new byte[1];
-
-                        try
-                        {
-                            BytesRead = ComPort.Read(AnswerData, 0, 1);
-
-                            if (BytesRead != 1 || AnswerData[0] != (byte)'A')
-                            {
-                                Log.Write($"Warning: Bulk ACK invalid. Expected 'A', got {(BytesRead == 1 ? AnswerData[0].ToString() : "nothing")}. Frame skipped.");
-                            }
-                        }
-                        catch (TimeoutException)
-                        {
-                            Log.Write("Warning: Timeout waiting for Bulk ACK. Frame lost, but continuing...");
-                            try
-                            {
-                                ComPort.DiscardOutBuffer();
-                                ComPort.DiscardInBuffer();
-                            }
-                            catch { }
-                        }
-                    }
-                }
-                // -----------------------------------------------------------------
-                // CLASSIC MODE (SEQUENTIAL PING-PONG PER STRIP WITH SOFT-FAIL)
-                // -----------------------------------------------------------------
-                else
-                {
-                    int SourcePosition = 0;
-                    for (int i = 0; i < maxChannels; i++)
-                    {
-                        int NrOfLedsOnStrip = NumberOfLedsPerStrip[i];
-                        if (NrOfLedsOnStrip > 0)
-                        {
-                            int TargetPosition = i * NumberOfLedsPerChannel;
-
-                            try
-                            {
-                                if (ComPort.BytesToRead > 0)
-                                {
-                                    ComPort.DiscardInBuffer();
-                                }
-                            }
-                            catch { }
-
-                            SendLedstripData(OutputValues.Skip(SourcePosition * 3).Take(NrOfLedsOnStrip * 3).ToArray(), TargetPosition);
-
-                            BytesRead = -1;
-                            AnswerData = new byte[1];
-
-                            try
-                            {
-                                BytesRead = ComPort.Read(AnswerData, 0, 1);
-                                if (BytesRead != 1 || AnswerData[0] != (byte)'A')
-                                {
-                                    Log.Write($"Warning: Classic Channel {i + 1} ACK invalid. Skipping channel frame segment.");
-                                }
-                            }
-                            catch (TimeoutException)
-                            {
-                                Log.Write($"Warning: Timeout waiting for Classic Channel {i + 1} ACK. Continuing loop...");
-                                try
-                                {
-                                    ComPort.DiscardOutBuffer();
-                                    ComPort.DiscardInBuffer();
-                                }
-                                catch { }
-                            }
-
-                            SourcePosition += NrOfLedsOnStrip;
-                        }
-                    }
-
-                    // Send master execution command latch
-                    CommandData = new byte[1] { (byte)'O' };
-                    ComPort.Write(CommandData, 0, 1);
-
-                    BytesRead = -1;
-                    AnswerData = new byte[1];
-
-                    try
-                    {
-                        BytesRead = ComPort.Read(AnswerData, 0, 1);
-                        if (BytesRead != 1 || AnswerData[0] != (byte)'A')
-                        {
-                            Log.Write("Warning: Output execution command ('O') ACK invalid. Frame rendering skipped.");
-                        }
-                    }
-                    catch (TimeoutException)
-                    {
-                        Log.Write("Warning: Timeout waiting for Output latch ACK ('O'). Continuing loop...");
-                        try
-                        {
-                            ComPort.DiscardOutBuffer();
-                            ComPort.DiscardInBuffer();
-                        }
-                        catch { }
-                    }
-                }
-            }
-            catch (Exception E)
-            {
-                // -----------------------------------------------------------------
-                // WATCHDOG AUTOMATED HARDWARE RECOVERY LAYER (Physical Disconnection)
-                // -----------------------------------------------------------------
-                Log.Write($"[DOF Critical] Hardware transmission pipe crashed ({E.Message}). Starting automated hot-plug recovery...");
-
-                bool reconnectionSuccessful = false;
-                int maxAttempts = 5;
-                int delayBetweenAttemptsMs = 3000; // 3 seconds evaluation pause per retry = 15s total structural window
-
-                for (int attempt = 1; attempt <= maxAttempts; attempt++)
-                {
-                    try
-                    {
-                        Log.Write($"[DOF Watchdog Recovery] Processing loop attempt {attempt} of {maxAttempts}...");
-
-                        try
-                        {
-                            if (ComPort.IsOpen)
-                            {
-                                ComPort.Close();
-                            }
-                        }
-                        catch { }
-
-                        Thread.Sleep(delayBetweenAttemptsMs);
-
-                        // Safe re-initialization of system descriptors (Maintained with explicit DTR isolation)
-                        ComPort.Open();
-
-                        Log.Write("[DOF Watchdog Recovery] COM-Port handle reclaimed. Re-initializing custom ESP32 payload array structures...");
-
-                        // Fire core setup matrix block (Triggers internal 3x structural try handlers)
-                        SetupController();
-
-                        Log.Write("[DOF Watchdog Recovery] SUCCESS! Controller hardware array re-established. Resuming runtime render frame processing.");
-                        reconnectionSuccessful = true;
-                        break;
-                    }
-                    catch (Exception reattemptEx)
-                    {
-                        // FIXED: Typo corrected from reattemEx to reattemptEx
-                        Log.Write($"[DOF Watchdog Recovery] Recovery branch tracking attempt {attempt} failed: {reattemptEx.Message}");
-                    }
-                }
-
-                if (!reconnectionSuccessful)
-                {
-                    Log.Write("[DOF Critical Watchdog Failure] Recovery window expired without valid device tracking. Killing pipeline updater thread.");
-                    throw new Exception("DirectOutput completely lost physical connection stability to the custom ESP32 architecture. Hardware link failure.", E);
-                }
-            }
-        }
-
         protected override void SendLedstripData(byte[] OutputValues, int TargetPosition)
         {
             if (UseCompression)
             {
+                //Try a simple color based RLE compression
                 CompressedData.Clear();
                 UncompressedData.Clear();
                 UncompressedData.AddRange(OutputValues);
@@ -513,6 +174,7 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
                         CompressedData.Add(g);
                         CompressedData.Add(b);
                     }
+
                 }
 
                 if (CompressedData.Count < OutputValues.Length)
@@ -520,10 +182,10 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
                     var nbData = CompressedData.Count / 4;
                     var nbLeds = OutputValues.Length / 3;
                     byte[] CommandData = new byte[7] {  (byte)'Q',
-                                                        (byte)(TargetPosition >> 8), (byte)(TargetPosition & 255),
-                                                        (byte)(nbData >> 8), (byte)(nbData & 255),
-                                                        (byte)(nbLeds >> 8), (byte)(nbLeds & 255)
-                                                        };
+                                                    (byte)(TargetPosition >> 8), (byte)(TargetPosition & 255),
+                                                    (byte)(nbData >> 8), (byte)(nbData & 255),
+                                                    (byte)(nbLeds >> 8), (byte)(nbLeds & 255)
+                                                    };
                     ComPort.Write(CommandData, 0, 7);
                     ComPort.Write(CompressedData.ToArray(), 0, CompressedData.Count);
                 }
@@ -535,6 +197,129 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
             else
             {
                 base.SendLedstripData(OutputValues, TargetPosition);
+            }
+        }
+
+        /// <summary>
+        /// Updates the outputs and implements a High-Availability Watchdog and Soft-Fail mechanism
+        /// to protect against Windows USB stutters and EMI disconnects.
+        /// </summary>
+        /// <param name="OutputValues">The OutputValues.</param>
+        protected override void UpdateOutputs(byte[] OutputValues)
+        {
+            if (ComPort == null || !ComPort.IsOpen) return;
+
+            // Enforce fast timeouts for the Soft-Fail mitigation (prevents thread freezing)
+            if (ComPort.ReadTimeout != 50) ComPort.ReadTimeout = 50;
+            if (ComPort.WriteTimeout != 50) ComPort.WriteTimeout = 50;
+
+            try
+            {
+                int FirstLed = 0;
+                for (int i = 0; i < NumberOfLedsPerStrip.Length; i++)
+                {
+                    int Leds = NumberOfLedsPerStrip[i];
+                    if (Leds > 0)
+                    {
+                        byte[] StripData = new byte[Leds * 3];
+                        Buffer.BlockCopy(OutputValues, FirstLed * 3, StripData, 0, Leds * 3);
+
+                        // Send the frame (Uses Q for compressed or R for classic uncompressed)
+                        SendLedstripData(StripData, i);
+
+                        // -----------------------------------------------------------------
+                        // WATCHDOG SOFT-FAIL LAYER (Protects against 2ms Windows stutters)
+                        // -----------------------------------------------------------------
+                        try
+                        {
+                            byte[] AnswerData = new byte[1];
+                            int bytesRead = ComPort.Read(AnswerData, 0, 1);
+
+                            if (bytesRead != 1 || AnswerData[0] != (byte)'A')
+                            {
+                                Log.Write($"[Watchdog Warning] Invalid or missing ACK from channel {i + 1}. Soft-failing frame...");
+                                ComPort.DiscardInBuffer();
+                            }
+                        }
+                        catch (TimeoutException)
+                        {
+                            // Soft-Fail: Ignore Windows stutters/timeouts, purge buffer and proceed to next frame
+                            // We do NOT crash the thread!
+                            Log.Write($"[Watchdog Warning] Timeout waiting for ACK on channel {i + 1}. Soft-failing frame and continuing...");
+                            ComPort.DiscardInBuffer();
+                        }
+                    }
+                    FirstLed += Leds;
+                }
+
+                // Send the 'O' (Output/Latch) command to display the frame
+                byte[] CommandData = new byte[1] { (byte)'O' };
+                ComPort.Write(CommandData, 0, 1);
+
+                // -----------------------------------------------------------------
+                // WATCHDOG SOFT-FAIL LAYER for the Latch Command
+                // -----------------------------------------------------------------
+                try
+                {
+                    byte[] AnswerData = new byte[1];
+                    int bytesRead = ComPort.Read(AnswerData, 0, 1);
+                    if (bytesRead != 1 || AnswerData[0] != (byte)'A')
+                    {
+                        Log.Write($"[Watchdog Warning] Invalid or missing ACK after latch ('O'). Soft-failing frame...");
+                        ComPort.DiscardInBuffer();
+                    }
+                }
+                catch (TimeoutException)
+                {
+                    Log.Write("[Watchdog Warning] Timeout waiting for Latch ACK. Soft-failing frame and continuing...");
+                    ComPort.DiscardInBuffer();
+                }
+            }
+            catch (Exception E)
+            {
+                // -----------------------------------------------------------------
+                // WATCHDOG AUTOMATED HARDWARE RECOVERY LAYER (Physical Disconnection)
+                // -----------------------------------------------------------------
+                // This catches IOException or similar hard crashes when EMI knocks out the USB port
+                Log.Write($"[Watchdog Critical] Hardware transmission crashed ({E.Message}). Starting automated hot-plug recovery...");
+
+                bool reconnectionSuccessful = false;
+                int maxAttempts = 15;
+                int delayBetweenAttemptsMs = 1000;
+
+                for (int attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    Log.Write($"[Watchdog] Reconnection attempt {attempt}/{maxAttempts}...");
+                    try
+                    {
+                        if (ComPort.IsOpen)
+                        {
+                            ComPort.Close();
+                        }
+
+                        Thread.Sleep(delayBetweenAttemptsMs);
+
+                        ComPort.Open();
+
+                        // Re-flash the initial configuration since the controller might have rebooted
+                        SetupController();
+
+                        reconnectionSuccessful = true;
+                        Log.Write("[Watchdog] Recovery successful! Port re-opened and setup flashed. Resuming normal operation.");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Write($"[Watchdog] Attempt {attempt} failed: {ex.Message}");
+                    }
+                }
+
+                if (!reconnectionSuccessful)
+                {
+                    Log.Write("[Watchdog Critical] Recovery failed after maximum attempts. Controller might be permanently disconnected.");
+                    // Throw the original exception to let DOF handle the fatal crash since recovery failed
+                    throw new Exception($"Watchdog recovery failed after {maxAttempts} attempts. Original error: {E.Message}", E);
+                }
             }
         }
     }
