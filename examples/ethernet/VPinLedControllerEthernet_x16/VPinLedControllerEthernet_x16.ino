@@ -155,7 +155,7 @@ void loadSettings() {
     fps_led_pin = preferences.getUChar("fps", fps_led_pin);
     freq_out_pin = preferences.getUChar("freq", freq_out_pin);
     
-    String savedIp = preferences.getString("ip", "10.10.10.100");
+    String savedIp = preferences.getString("ip", local_ip.toString());
     local_ip.fromString(savedIp);
     IPAddress local_ip(local_ip);
     port = preferences.getUShort("port", 6454);
