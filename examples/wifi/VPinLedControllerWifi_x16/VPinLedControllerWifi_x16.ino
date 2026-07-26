@@ -1,37 +1,44 @@
 #include <VPinLedControllerWifi.h>
-
-// --- FEATURE SWITCH ---
-#define ENABLE_LED_TEST 1 
-
-// --- LED HARDWARE CONFIG ---
-#define FPS_LED_PIN 48
-#define FREQ_OUT_PIN 2
 #define NUM_STRIPS 16
 
+// --- FEATURE SWITCH ---
+bool enable_led_test = true;
+
+// --- LED HARDWARE CONFIG ---
+uint8_t fps_led_pin = 48;
+uint8_t freq_out_pin = 2;
+
+// --- Your HARDWARE PINS (ESP32-S3) ---
+uint8_t pins[NUM_STRIPS] = {
+    1, 4, 5, 6, 7, 15, 16, 17, 18,    // Channels 0 to 7
+    8, 9, 10, 11, 12, 13, 14      // Channels 8 to 15
+};
+
+
 // --- WLAN ACCESS POINT DATA ---
-// So heißt das WLAN, das der ESP32 ausstrahlt:
-const char* ap_ssid = "VPin_LED_Controller";       
-const char* ap_password = "vpinpassword";
+String ap_ssid = "VPin_LED_Controller";       
+String ap_pass = "vpinpassword";
+String ssid = "YOUR SSID";       
+String pass = "YOUR PASS";
 
 // Define a fixed IP address for the AP
+bool use_ap_mode = true;
+bool use_dhcp = true;
 IPAddress local_ip(192, 168, 4, 1);
-IPAddress gateway(192, 168, 4, 1);
 IPAddress subnet(255, 255, 255, 0);
 
-// --- YOUR HARDWARE PINS (ESP32-S3) ---
-const uint8_t pins[NUM_STRIPS] = {
-    1, 4, 5, 6, 7, 8, 9, 10, 11,    // Channels 0 to 7
-    12, 13, 14, 15, 16, 17, 18      // Channels 8 to 15
-};
+uint16_t port = 6454;
+WiFiUDP udp;
 
 // --- 16-CHANNEL ENGINE ---
 typedef NeoPixelBus<NeoGrbFeature, NeoEsp32LcdX16Ws2812xMethod> MyPixelBus;
 MyPixelBus* strips[NUM_STRIPS];
 
-NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod> fpsLed(1, FPS_LED_PIN);
+NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod>* fpsLed = nullptr;
 uint8_t fpsLedBrightness = 30;
 
-WiFiUDP udp;
+
+
 uint8_t frameBuffer[36000]; 
 uint8_t currentFrameId = 255;
 uint8_t chunksReceived = 0;
@@ -50,7 +57,9 @@ RgbColor applyBrightness(RgbColor color, uint8_t brightness) {
 
 void ShowAll() {
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
-        strips[i]->Show();
+        if (strips[i] != nullptr){
+            strips[i]->Show();
+        }
     }
 }
 
@@ -59,170 +68,424 @@ void canShow(){
     while (!isReady){
         isReady = true;
         for(uint8_t i = 0; i < NUM_STRIPS; i++) {
-            if (!strips[i]->CanShow()){
-                isReady = false;
-                break;
+            if (strips[i] != nullptr){
+                if (!strips[i]->CanShow()){
+                    isReady = false;
+                    break;
+                }
             }
         }
     }
 }
 
 void UpdateFpsLed() {
-    // This function is now called directly in the main loop.
-   
-        unsigned long currentMillis = millis();
-        lastPacketTime = currentMillis;
-        frameCount++;
-        isStandby = false;
+    unsigned long currentMillis = millis();
+    lastPacketTime = currentMillis;
+    isStandby = false;
 
+    if (fps_led_pin == 255){return;}
+    frameCount++;
     if (currentMillis - lastFpsTime >= 1000) {
         int currentFps = frameCount;
-        
         frameCount = 0;
         lastFpsTime = currentMillis;
-
         RgbColor fpsColor;
 
-        // If your 1.5-second timeout is active (0 FPS), turn off or dim the LED
-        if (currentFps == 0) {
-            fpsColor = RgbColor(0, 0, 0); // Off (Standby)
-        } 
-        // Die neue, feinere Skala:
-        else if (currentFps < 20) {
-            fpsColor = RgbColor(255, 0, 0);       // Red
-        } else if (currentFps >= 20 && currentFps <= 29) {
-            fpsColor = RgbColor(255, 100, 0);     // Orange
-        } else if (currentFps >= 30 && currentFps <= 39) {
-            fpsColor = RgbColor(255, 255, 0);     // Yellow
-        } else if (currentFps >= 40 && currentFps <= 49) {
-            fpsColor = RgbColor(100, 255, 0);     // Light green
-        } else if (currentFps >= 50 && currentFps <= 59) {
-            fpsColor = RgbColor(0, 255, 0);       // Dark green
-        } else if (currentFps >= 60 && currentFps <= 69) {
-            fpsColor = RgbColor(0, 255, 255);     // Cyan (Perfect)
-        } else if (currentFps >= 70 && currentFps <= 89) {
-            fpsColor = RgbColor(0, 0, 255);       // Blue
-        } else if (currentFps >= 90 && currentFps <= 119) {
-            fpsColor = RgbColor(148, 0, 211);     // Violet
-        } else { 
-            fpsColor = RgbColor(255, 255, 255);   // White (120+)
-        }
+        if (currentFps < 20) fpsColor = RgbColor(255, 0, 0);       
+        else if (currentFps <= 29) fpsColor = RgbColor(255, 100, 0); 
+        else if (currentFps <= 39) fpsColor = RgbColor(255, 255, 0); 
+        else if (currentFps <= 49) fpsColor = RgbColor(100, 255, 0); 
+        else if (currentFps <= 59) fpsColor = RgbColor(0, 255, 0);   
+        else if (currentFps <= 69) fpsColor = RgbColor(0, 255, 255); 
+        else if (currentFps <= 89) fpsColor = RgbColor(0, 0, 255);   
+        else if (currentFps <= 119) fpsColor = RgbColor(148, 0, 211);
+        else fpsColor = RgbColor(255, 255, 255); 
 
-        fpsLed.SetPixelColor(0, applyBrightness(fpsColor, fpsLedBrightness));
-        fpsLed.Show();
+        fpsLed->SetPixelColor(0, applyBrightness(fpsColor, fpsLedBrightness));
+        fpsLed->Show();
     }
 }
 
 void ReconfigureLcdDma(uint16_t* newLengths) {
-    Serial.println("New frame layout detected! Starting hardware reset...");
 
-    // 1. Free up RAM
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
         if (strips[i] != nullptr) {
             delete strips[i];
             strips[i] = nullptr;
         }
     }
-
-    delay(50); 
+    delay(20); 
 
     for (int i = 0; i < NUM_STRIPS; i++) {
         pinIndex[i] = i;
         uint16_t exactLen = newLengths[i];
         uint16_t safeLen = (exactLen > 0) ? exactLen : 0;
-        activeLengths[i] = exactLen;
+        activeLengths[i] = safeLen;
     }
 
-    // 2. Sorting with std::sort and a lambda function
     std::sort(pinIndex, pinIndex + NUM_STRIPS, [](int a, int b) {
         return activeLengths[a] > activeLengths[b];
     });
     
     for(uint8_t k = 0; k < NUM_STRIPS; k++) {
-        // Stores at which position 'k' the original channel ended up
         reverseIndex[pinIndex[k]] = k; 
     }
     
-    // 3. Rebuild strips with exact length
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
-        strips[i] = new MyPixelBus(activeLengths[pinIndex[i]], pins[pinIndex[i]]);
-        strips[i]->Begin();
-        strips[i]->ClearTo(RgbColor(0)); 
+        uint16_t len = activeLengths[pinIndex[i]];
+        if (len == 0) len = 1; 
+        if (pins[pinIndex[i]] != 255){
+            strips[i] = new MyPixelBus(len, pins[pinIndex[i]]);
+            strips[i]->Begin();
+            strips[i]->ClearTo(RgbColor(0)); 
+        }
     }
 
-
-
     ShowAll();
-    Serial.println("Hardware successfully calibrated to new desk layout!");
+}
+
+void loadSettings() {
+    preferences.begin("vpin", false);
+
+    ssid = preferences.getString("ssid", ssid);
+    pass = preferences.getString("pass", pass);
+    ap_ssid = preferences.getString("ap_ssid", ap_ssid);
+    ap_pass = preferences.getString("ap_pass", ap_pass);
+
+    enable_led_test = preferences.getBool("led", enable_led_test);
+    use_dhcp = preferences.getBool("dhcp", false);
+    use_ap_mode = preferences.getBool("ap", true);
+    fps_led_pin = preferences.getUChar("fps", fps_led_pin);
+    freq_out_pin = preferences.getUChar("freq", freq_out_pin);
+    
+    String savedIp = preferences.getString("ip", "192, 168, 4, 1");
+    local_ip.fromString(savedIp);
+    IPAddress local_ip(local_ip);
+    port = preferences.getUShort("port", 6454);
+
+    if (preferences.getBytesLength("pins") == NUM_STRIPS) {
+        preferences.getBytes("pins", pins, NUM_STRIPS);
+    }
+    
+    preferences.end(); 
+}
+
+void saveSettings() {
+    preferences.begin("vpin", false);
+    
+    preferences.putString("ssid", ssid);
+    preferences.putString("pass", pass);
+    preferences.putString("ap_ssid", ap_ssid);
+    preferences.putString("ap_pass", ap_pass);
+    preferences.putBool("led", enable_led_test);
+    preferences.putBool("dhcp", use_dhcp);
+    preferences.putBool("ap", use_ap_mode);
+    preferences.putUChar("fps", fps_led_pin);
+    preferences.putUChar("freq", freq_out_pin);
+    preferences.putString("ip", local_ip.toString());
+    preferences.putUShort("port", port);
+    preferences.putBytes("pins", pins, NUM_STRIPS);
+
+    preferences.end();
 }
 
 void setup() {
     Serial.begin(115200);
-    pinMode(FREQ_OUT_PIN, OUTPUT);
+    Serial0.begin(115200);
+    loadSettings();
+
+    if (freq_out_pin != 255){pinMode(freq_out_pin, OUTPUT);}
+
+    if (freq_out_pin != 255){
+        fpsLed = new NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod>(1, fps_led_pin);
+        fpsLed->Begin();
+    }
+
     for(uint8_t i = 0; i < NUM_STRIPS; i++) {
-        strips[i] = new MyPixelBus(1100, pins[i]);
-        strips[i]->Begin();
-        strips[i]->ClearTo(RgbColor(0));
+        if (pins[i] != 255){
+            strips[i] = new MyPixelBus(1100, pins[i]);
+            strips[i]->Begin();
+            strips[i]->ClearTo(RgbColor(0));
+        }else{
+            strips[i] = nullptr;
+        } 
     }
     ShowAll();
-    
-    fpsLed.Begin();
 
-    #if ENABLE_LED_TEST
-        uint32_t start = millis();
-        while (millis() - start < 500) {
-            if (Serial.available() > 0) return;
-            yield();
+    bool isSoftReset = (resetMagicNumber == 12345678);
+    resetMagicNumber = 0;
+
+    if(enable_led_test && !isSoftReset){
+
+        if (fps_led_pin != 255 && fpsLed != nullptr){
+            fpsLed->SetPixelColor(0, applyBrightness(RgbColor(255, 255, 255), fpsLedBrightness)); 
+            fpsLed->Show();
         }
-        
-        fpsLed.SetPixelColor(0, applyBrightness(RgbColor(255, 255, 255), fpsLedBrightness)); 
-        fpsLed.Show();
 
-        for(uint8_t i=0; i<NUM_STRIPS; i++) strips[i]->ClearTo(RgbColor(255, 0, 0));
+        for(uint8_t i=0; i<NUM_STRIPS; i++) {
+            if (strips[i] != nullptr) strips[i]->ClearTo(RgbColor(255, 0, 0));
+        }
         ShowAll(); delay(500);
         
-        for(uint8_t i=0; i<NUM_STRIPS; i++) strips[i]->ClearTo(RgbColor(0, 255, 0));
+        for(uint8_t i=0; i<NUM_STRIPS; i++) {
+            if (strips[i] != nullptr) strips[i]->ClearTo(RgbColor(0, 255, 0));
+        }
         ShowAll(); delay(500);
         
-        for(uint8_t i=0; i<NUM_STRIPS; i++) strips[i]->ClearTo(RgbColor(0, 0, 255));
+        for(uint8_t i=0; i<NUM_STRIPS; i++) {
+            if (strips[i] != nullptr) strips[i]->ClearTo(RgbColor(0, 0, 255));
+        }
         ShowAll(); delay(500);
-        for(uint8_t i=0; i<NUM_STRIPS; i++) strips[i]->ClearTo(RgbColor(0, 0, 0));
+        
+        for(uint8_t i=0; i<NUM_STRIPS; i++) {
+            if (strips[i] != nullptr) strips[i]->ClearTo(RgbColor(0, 0, 0));
+        }
         ShowAll();
 
-        fpsLed.SetPixelColor(0, applyBrightness(RgbColor(0, 0, 0), fpsLedBrightness)); 
-        fpsLed.Show();
+        if (fps_led_pin != 255 && fpsLed != nullptr){
+            fpsLed->SetPixelColor(0, applyBrightness(RgbColor(0, 0, 0), fpsLedBrightness)); 
+            fpsLed->Show();
+        }
+    }
 
-    #endif
+    WiFi.disconnect(true, true);
+    delay(100);
 
-    // --- 2. START WLAN ACCESS POINT ---
-    Serial.println("\nStarting Access Point mode...");
+    if (use_ap_mode) {
 
-    WiFi.disconnect(true,true);
-    // Put ESP32 into AP mode
-    WiFi.mode(WIFI_AP);
-    
-    // Assign a fixed IP address
-    WiFi.softAPConfig(local_ip, gateway, subnet);
-    
-    // Set up a network
-    WiFi.softAP(ap_ssid, ap_password);
+        Serial.println("\nStarting Access Point mode...");
+		Serial0.println("\nStarting Access Point mode...");
+        WiFi.mode(WIFI_AP);
+        
+        WiFi.softAPConfig(local_ip, local_ip, subnet);
+        WiFi.softAP(ap_ssid.c_str(), ap_pass.c_str());
 
-    Serial.print("Wi-Fi network '");
-    Serial.print(ap_ssid);
-    Serial.println("' is active!");
-    Serial.print("IP address for DOF XML: ");
-    Serial.println(WiFi.softAPIP());
+        Serial.print("Hotspot '"); Serial.print(ap_ssid); Serial.println("' is active!");
+        Serial.print("IP: "); Serial.println(WiFi.softAPIP());
+		Serial0.print("Hotspot '"); Serial0.print(ap_ssid); Serial0.println("' is active!");
+        Serial0.print("IP: "); Serial0.println(WiFi.softAPIP());
+    } 
+    else {
+        Serial.println("\nConnecting to Router (STA mode)...");
+		Serial0.println("\nConnecting to Router (STA mode)...");
+        WiFi.mode(WIFI_STA);
 
-    // --- 3. START UDP ---
-    udp.begin(6454);
+        if (!use_dhcp) {
+
+            IPAddress gateway = local_ip;
+            gateway[3] = 1;
+            WiFi.config(local_ip, gateway, subnet);
+        }
+
+        if (ssid.length() > 0) {
+            WiFi.begin(ssid.c_str(), pass.c_str());
+            
+            uint32_t startAttempt = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
+                delay(100);
+            }
+        }
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.print("Connected! IP: "); Serial.println(WiFi.localIP());
+			Serial0.print("Connected! IP: "); Serial0.println(WiFi.localIP());
+        } else {
+            Serial.println("Connection pending... (running in background)");
+			Serial0.println("Connection pending... (running in background)");
+        }
+    }
+
+    udp.begin(port);
     lastPacketTime = millis();
 }
 
 void loop() {
+	
+	if (Serial.available()) {
+        activeSerial = &Serial;   // Nativer USB-Port
+    } 
+    else if (Serial0.available()) {
+        activeSerial = &Serial0;  // UART-Port
+    }
+
+    if (activeSerial->available()) {
+        byte receivedByte = activeSerial->read();
+        if(receivedByte == '?'){
+            String cmd = activeSerial->readStringUntil('\n');
+            cmd.trim();
+
+			if (cmd == "INFO") {
+				String pinString = "";
+				for(int i=0; i<NUM_STRIPS; i++) {
+					pinString += String(pins[i]);
+					if(i < NUM_STRIPS-1) pinString += ",";
+				}
+
+				String response = "S3_FW:WIFI;";
+				response += "LED:" + String(enable_led_test ? 1 : 0) + ";"; 
+				response += "FPS:" + String(fps_led_pin) + ";";
+				response += "FREQ:" + String(freq_out_pin) + ";";
+				response += "PINS:" + pinString + ";";
+				response += "AP:" + String(use_ap_mode ? "1" : "0") + ";";
+				response += "DHCP:" + String(use_dhcp ? "1" : "0") + ";";
+				response += "APS:" + String(ap_ssid) + ";";
+				response += "APP:" + String(ap_pass) + ";";
+				response += "SSID:" + ssid + ";";
+				response += "PASS:" + pass + ";";
+				
+				if (use_ap_mode) {
+					response += "IP:" + WiFi.softAPIP().toString() + ";";
+				} else {
+					response += "IP:" + WiFi.localIP().toString() + ";";
+				}
+				
+				response += "PORT:" + String(port);
+
+				activeSerial->println(response);
+			}
+        }
+        else if(receivedByte == '!'){
+            String payload = activeSerial->readStringUntil('\n');
+            payload.trim();
+			if (payload.startsWith("SAVE;")) {
+				String data = payload.substring(5); 
+				int startIndex = 0;
+				
+				uint8_t tempPins[NUM_STRIPS];
+				for(int i = 0; i < NUM_STRIPS; i++) tempPins[i] = pins[i];
+				uint8_t tempFps = fps_led_pin;
+				uint8_t tempFreq = freq_out_pin;
+				bool tempAp = use_ap_mode;
+				bool tempDhcp = use_dhcp;
+				String tempSsid = ssid;
+				String tempPass = pass;
+				String tempAps = ap_ssid;
+				String tempApp = ap_pass;
+				IPAddress tempIp = local_ip;
+				uint16_t tempPort = port;
+				bool tempLedTest = enable_led_test;
+
+				while (startIndex < data.length()) {
+					int scIndex = data.indexOf(';', startIndex);
+					String pair = (scIndex == -1) ? data.substring(startIndex) : data.substring(startIndex, scIndex);
+					startIndex = (scIndex == -1) ? data.length() : scIndex + 1;
+
+					int colon = pair.indexOf(':');
+					if (colon != -1) {
+						String key = pair.substring(0, colon);
+						String val = pair.substring(colon + 1);
+						
+						if (key == "AP") tempAp = (val == "1");
+						else if (key == "DHCP") tempDhcp = (val == "1");
+						else if (key == "SSID") tempSsid = val;
+						else if (key == "PASS") tempPass = val;
+						else if (key == "APS") tempAps = val;
+						else if (key == "APP") tempApp = val;
+						else if (key == "IP") tempIp.fromString(val);
+						else if (key == "PORT") tempPort = (uint16_t)val.toInt();
+						else if (key == "LED") {tempLedTest = (val == "1");} 
+						else if (key == "FPS") {tempFps = (uint8_t)val.toInt();} 
+						else if (key == "FREQ") {tempFreq = (uint8_t)val.toInt();} 
+						else if (key == "PINS") {
+							int pStart = 0;
+							int arrIndex = 0;
+							while (pStart < val.length() && arrIndex < NUM_STRIPS) {
+								int comma = val.indexOf(',', pStart);
+								String p = (comma == -1) ? val.substring(pStart) : val.substring(pStart, comma);
+								pStart = (comma == -1) ? val.length() : comma + 1;
+										
+								tempPins[arrIndex] = (uint8_t)p.toInt();
+								arrIndex++;
+							}
+						}
+					}
+				}
+
+				bool outputsChanged = false;
+				for(int i=0; i<NUM_STRIPS; i++) {
+					if(pins[i] != tempPins[i]) outputsChanged = true;
+				}
+				bool freqChanged = (freq_out_pin != tempFreq);
+				bool fpsChanged = (fps_led_pin != tempFps);
+				bool networkChanged = (use_ap_mode != tempAp || use_dhcp != tempDhcp || ap_ssid != tempAps || ap_pass != tempApp || ssid != tempSsid || pass != tempPass || local_ip != tempIp || port != tempPort);
+
+				if (outputsChanged) {
+					for(uint8_t i = 0; i < NUM_STRIPS; i++) {
+						if (strips[i] != nullptr) {
+							delete strips[i];
+							strips[i] = nullptr;
+						}
+					}
+					delay(20); 
+				}
+						
+				if (fpsChanged) {
+					if (fpsLed != nullptr) {
+						delete fpsLed;
+						fpsLed = nullptr;
+					}
+					if(fps_led_pin != 255) pinMode(fps_led_pin, INPUT);
+				}
+
+				if (freqChanged) {
+					if(freq_out_pin != 255) pinMode(freq_out_pin, INPUT);
+				}
+
+				for(int i=0; i<NUM_STRIPS; i++) pins[i] = tempPins[i];
+				fps_led_pin = tempFps;
+				freq_out_pin = tempFreq;
+				enable_led_test = tempLedTest;
+				use_ap_mode = tempAp;
+				use_dhcp = tempDhcp;
+				ap_ssid = tempAps;
+				ap_pass = tempApp;
+				ssid = tempSsid;
+				pass = tempPass;
+				local_ip = tempIp;
+				port = tempPort;
+
+				if (outputsChanged) {
+					ReconfigureLcdDma(activeLengths);
+				}
+						
+				if (fpsChanged) {
+					if (fps_led_pin != 255){
+						fpsLed = new NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod>(1, fps_led_pin);
+						fpsLed->Begin();
+					}
+				}
+
+				if (freqChanged) {
+					if(freq_out_pin != 255) {
+						pinMode(freq_out_pin, OUTPUT);
+						digitalWrite(freq_out_pin, LOW);
+					}
+				}
+
+				saveSettings(); 
+				activeSerial->write('A');
+
+				if (networkChanged) {
+					resetMagicNumber = 12345678;
+					delay(500);
+					ESP.restart();
+				}
+			}
+			else if (payload == "RESET") {
+				nvs_flash_erase(); 
+				nvs_flash_init();
+				
+				activeSerial->write('A'); 
+				
+				delay(100);
+				ESP.restart();
+			}
+		}
+    }
     int packetSize = udp.parsePacket();
     
     if (packetSize > 3) { 
-        digitalWrite(FREQ_OUT_PIN, HIGH);
+        if (freq_out_pin != 255) digitalWrite(freq_out_pin, HIGH);
         uint8_t chunkHeader[3];
         udp.read(chunkHeader, 3);
         
@@ -251,14 +514,12 @@ void loop() {
             for (int i = 0; i < NUM_STRIPS; i++) {
                 stripLengths[i] = (frameBuffer[1 + (i * 2)] << 8) | frameBuffer[2 + (i * 2)];
             
-            // As soon as even one channel deviates, we know: New layout!
                 if (stripLengths[i] != activeLengths[i]) {
                     layoutChanged = true;
                 }
             
             }
 
-            // 2. If it is a new layout -> trigger hardware reset!
             if (layoutChanged) {
                 ReconfigureLcdDma(stripLengths);
             }
@@ -279,7 +540,7 @@ void loop() {
                     }
                 }
             }
-            digitalWrite(FREQ_OUT_PIN, LOW);
+            if (freq_out_pin != 255) digitalWrite(freq_out_pin, LOW);
             canShow();
             ShowAll();            
             UpdateFpsLed();
@@ -287,12 +548,16 @@ void loop() {
     } 
     else if (!isStandby && (millis() - lastPacketTime > 1500)) {
         for(uint8_t i = 0; i < NUM_STRIPS; i++) {
-            strips[i]->ClearTo(RgbColor(0));
+            if (strips[i] != nullptr){
+                strips[i]->ClearTo(RgbColor(0));
+            }
         }
         ShowAll();
         
-        fpsLed.SetPixelColor(0, RgbColor(0, 0, 0));
-        fpsLed.Show();
+        if (fps_led_pin != 255){
+            fpsLed->SetPixelColor(0, RgbColor(0, 0, 0));
+            fpsLed->Show();
+        }
         frameCount = 0; 
         
         isStandby = true; 
