@@ -41,7 +41,7 @@ By default, the sketch assigns the IP `192.168.1.201` to the ESP32. We will set 
 2. Right-click the Ethernet adapter connected to the ESP32/Switch and select **Properties**.
 3. Select **Internet Protocol Version 4 (TCP/IPv4)** and click **Properties**.
 4. Check **"Use the following IP address"** and enter:
-   * **IP address:** `192.168.1.100`
+   * **IP address:** `192.168.1.10`
    * **Subnet mask:** `255.255.255.0`
    * **Default gateway:** *(Leave completely blank!)*
 5. Click OK to save.
@@ -52,15 +52,14 @@ By default, the sketch assigns the IP `192.168.1.201` to the ESP32. We will set 
 
 Before flashing the Ethernet sketch, ensure your Arduino IDE `Tools` menu is configured correctly. 
 
-**Crucial Setting:** You must set `USB CDC On Boot` to **Disabled**! Leaving it enabled while using LAN can cause the ESP32 to freeze if no serial monitor is actively listening via USB.
-
 **Key Settings Checklist:**
 * **Board:** ESP32S3 Dev Module
-* **USB CDC On Boot:** `Disabled` *(CRITICAL!)*
+* **USB CDC On Boot:** `Enabled`
 * **USB Mode:** `Hardware CDC and JTAG`
 * **Upload Mode:** `UART0 / Hardware CDC`
 * **CPU Frequency:** `240MHz`
 * **Flash Mode:** `QIO 80MHz`
+* **Arduino Runs On:** `Core 1`
 
 ---
 
