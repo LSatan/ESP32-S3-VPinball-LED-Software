@@ -35,7 +35,7 @@ If your cabinet features other local network devices that need to communicate wi
 
 Because we are bypassing standard home routers, there is no DHCP server to assign IP addresses. You must manually assign a **Static IP** to the network adapter on your VPin PC.
 
-By default, the sketch assigns the IP `192.168.1.201` to the ESP32. We will set the PC to `192.168.1.100`.
+By default, the sketch assigns the IP `192.168.1.100` to the ESP32. We will set the PC to `192.168.1.10`.
 
 1. Press `Win + R`, type `ncpa.cpl`, and hit Enter.
 2. Right-click the Ethernet adapter connected to the ESP32/Switch and select **Properties**.
