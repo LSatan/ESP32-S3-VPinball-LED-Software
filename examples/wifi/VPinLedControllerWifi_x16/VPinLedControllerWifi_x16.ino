@@ -254,7 +254,6 @@ void setup() {
     if (use_ap_mode) {
 
         Serial.println("\nStarting Access Point mode...");
-		Serial0.println("\nStarting Access Point mode...");
         WiFi.mode(WIFI_AP);
         
         WiFi.softAPConfig(local_ip, local_ip, subnet);
@@ -262,12 +261,9 @@ void setup() {
 
         Serial.print("Hotspot '"); Serial.print(ap_ssid); Serial.println("' is active!");
         Serial.print("IP: "); Serial.println(WiFi.softAPIP());
-		Serial0.print("Hotspot '"); Serial0.print(ap_ssid); Serial0.println("' is active!");
-        Serial0.print("IP: "); Serial0.println(WiFi.softAPIP());
     } 
     else {
         Serial.println("\nConnecting to Router (STA mode)...");
-		Serial0.println("\nConnecting to Router (STA mode)...");
         WiFi.mode(WIFI_STA);
 
         if (!use_dhcp) {
@@ -288,10 +284,8 @@ void setup() {
         
         if (WiFi.status() == WL_CONNECTED) {
             Serial.print("Connected! IP: "); Serial.println(WiFi.localIP());
-			Serial0.print("Connected! IP: "); Serial0.println(WiFi.localIP());
         } else {
             Serial.println("Connection pending... (running in background)");
-			Serial0.println("Connection pending... (running in background)");
         }
     }
 
@@ -300,18 +294,11 @@ void setup() {
 }
 
 void loop() {
-	
-	if (Serial.available()) {
-        activeSerial = &Serial;   // Nativer USB-Port
-    } 
-    else if (Serial0.available()) {
-        activeSerial = &Serial0;  // UART-Port
-    }
 
-    if (activeSerial->available()) {
-        byte receivedByte = activeSerial->read();
+    if (Serial.available()) {
+        byte receivedByte = Serial.read();
         if(receivedByte == '?'){
-            String cmd = activeSerial->readStringUntil('\n');
+            String cmd = Serial.readStringUntil('\n');
             cmd.trim();
 
 			if (cmd == "INFO") {
@@ -341,11 +328,11 @@ void loop() {
 				
 				response += "PORT:" + String(port);
 
-				activeSerial->println(response);
+				Serial.println(response);
 			}
         }
         else if(receivedByte == '!'){
-            String payload = activeSerial->readStringUntil('\n');
+            String payload = Serial.readStringUntil('\n');
             payload.trim();
 			if (payload.startsWith("SAVE;")) {
 				String data = payload.substring(5); 
@@ -463,7 +450,7 @@ void loop() {
 				}
 
 				saveSettings(); 
-				activeSerial->write('A');
+				Serial.write('A');
 
 				if (networkChanged) {
 					resetMagicNumber = 12345678;
@@ -475,7 +462,7 @@ void loop() {
 				nvs_flash_erase(); 
 				nvs_flash_init();
 				
-				activeSerial->write('A'); 
+				Serial.write('A'); 
 				
 				delay(100);
 				ESP.restart();
