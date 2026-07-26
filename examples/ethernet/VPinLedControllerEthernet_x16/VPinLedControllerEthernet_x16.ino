@@ -185,7 +185,6 @@ void saveSettings() {
 
 void setup() {
     Serial.begin(115200);
-	Serial0.begin(115200);
     loadSettings();
 
     if (freq_out_pin != 255){pinMode(freq_out_pin, OUTPUT);}
@@ -258,12 +257,9 @@ void setup() {
         SPI.begin(lan_pins[2], lan_pins[1], lan_pins[0], -1);
         Ethernet.init(lan_pins[3]);
         Ethernet.begin(mac, local_ip);
-        //Serial.println("Warte auf Netzwerk-Link...");
         while (Ethernet.linkStatus() != LinkON) {
             delay(100);
         }
-        //Serial.println("Network connected!");
-        //delay(100);
         udp.begin(port);
         delay(100);
         udp.flush();
@@ -275,16 +271,9 @@ void setup() {
 void loop() {
 
     if (Serial.available()) {
-        activeSerial = &Serial;   // Nativ USB-Port
-    } 
-    else if (Serial0.available()) {
-        activeSerial = &Serial0;  // UART-Port
-    }
-
-    if (activeSerial->available()) {
-        byte receivedByte = activeSerial->read();
+        byte receivedByte = Serial.read();
         if(receivedByte == '?'){
-                String cmd = activeSerial->readStringUntil('\n');
+                String cmd = Serial.readStringUntil('\n');
                 cmd.trim();
                 
                 if (cmd == "INFO") {
@@ -313,11 +302,11 @@ void loop() {
                     response += "IP:" + Ethernet.localIP().toString() + ";";
                     response += "PORT:" + portStr;
 
-                    activeSerial->println(response);
+                    Serial.println(response);
                 }
         }
         else if(receivedByte == '!'){
-                String payload = activeSerial->readStringUntil('\n');
+                String payload = Serial.readStringUntil('\n');
                 payload.trim();
                 
                 if (payload.startsWith("SAVE;")) {
@@ -469,7 +458,7 @@ void loop() {
                     saveSettings();
                     
                     while(!activeSerial);
-                    activeSerial->write('A');
+                    Serial.write('A');
                     
                     if (lanChanged) {
                         resetMagicNumber = 12345678;
@@ -481,13 +470,13 @@ void loop() {
                     nvs_flash_erase(); 
                     nvs_flash_init();
                     
-                    activeSerial->write('A'); 
+                    Serial.write('A'); 
                     
                     delay(100);
                     ESP.restart();
                 }
         }else{
-            while(activeSerial->available()) activeSerial->read();
+            while(Serial.available()) Serial.read();
         }
     }
 
