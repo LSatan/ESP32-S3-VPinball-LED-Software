@@ -8,6 +8,9 @@
 // --- FEATURE SWITCH ---
 bool enable_led_test = true; 
 
+// --- LED power supply max mA power adapter ---
+uint32_t maxCurrent_mA = 15000; // 15000 mA = 15A
+
 // --- LED HARDWARE CONFIG ---
 uint8_t fps_led_pin = 48;
 uint8_t freq_out_pin = 2;
@@ -22,7 +25,7 @@ uint8_t pins[NUM_STRIPS] = {
     8, 9, 10, 11, 12, 13, 14      // Channels 8 to 15
 };
 
-const uint16_t BufferSize = 16000;
+const uint16_t BufferSize = 24000;
 uint16_t dofBlockSize = 1100;
 
 // --- 16-CHANNEL ENGINE ---
@@ -79,6 +82,28 @@ void canShow(){
             }
         }
     }
+}
+
+uint32_t totalCurrent_mA = 0;
+void checkPowerLimit(){
+    if (!maxCurrent_mA) {totalCurrent_mA = 0; return;}
+    if (totalCurrent_mA > maxCurrent_mA) {
+        float factor = (float)maxCurrent_mA / (float)totalCurrent_mA;
+        uint8_t dimValue = (uint8_t)(factor * 255.0f);
+        
+        for (int channel = 0; channel < NUM_STRIPS; channel++) {
+            if (strips[reverseIndex[channel]] != nullptr) {
+                
+                uint16_t ledCount = activeLengths[channel];
+                
+                for (uint16_t i = 0; i < ledCount; i++) {
+                    RgbColor originalColor = strips[reverseIndex[channel]]->GetPixelColor(i);
+                    strips[reverseIndex[channel]]->SetPixelColor(i, originalColor.Dim(dimValue));
+                }
+            }
+        }
+    }
+    totalCurrent_mA = 0;
 }
 
 void UpdateFpsLed() {
@@ -151,10 +176,9 @@ void loadSettings() {
     preferences.begin("vpin", false);
     
     enable_led_test = preferences.getBool("led", enable_led_test);
-
     fps_led_pin = preferences.getUChar("fps", fps_led_pin);
     freq_out_pin = preferences.getUChar("freq", freq_out_pin);
-
+    maxCurrent_mA = preferences.getUInt("psuLimit", maxCurrent_mA);
     if (preferences.getBytesLength("pins") == NUM_STRIPS) {
         preferences.getBytes("pins", pins, NUM_STRIPS);
     }
@@ -166,10 +190,9 @@ void saveSettings() {
     preferences.begin("vpin", false);
     
     preferences.putBool("led", enable_led_test);
-    
     preferences.putUChar("fps", fps_led_pin);
     preferences.putUChar("freq", freq_out_pin);
- 
+    preferences.putUInt("psuLimit", maxCurrent_mA);
     preferences.putBytes("pins", pins, NUM_STRIPS);
     
     preferences.end();
@@ -288,6 +311,7 @@ void loop() {
                 if (layoutChanged) {
                     ReconfigureLcdDma(stripLengths);
                 } else {
+                    checkPowerLimit();
                     canShow();
                     ShowAll();
                 }
@@ -326,6 +350,7 @@ void loop() {
                     if (layoutChanged) {
                         ReconfigureLcdDma(stripLengths);
                     } else {
+                        checkPowerLimit();
                         canShow();
                         ShowAll();
                     }
@@ -367,6 +392,7 @@ void loop() {
 
                     String response = "S3_FW:USB;";
                     response += "LED:" + String(enable_led_test ? 1 : 0) + ";";
+                    response += "PSU:" + String(maxCurrent_mA) + ";";
                     response += "FPS:" + fpsStr + ";";
                     response += "FREQ:" + freqStr + ";";
                     response += "PINS:" + pinString;
@@ -403,7 +429,10 @@ void loop() {
                             } 
                             else if (key == "FPS") {
                                 tempFps = (uint8_t)val.toInt();
-                            } 
+                            }
+                            else if (key == "PSU") {
+                                maxCurrent_mA = (uint32_t)val.toInt();
+                            }
                             else if (key == "FREQ") {
                                 tempFreq = (uint8_t)val.toInt();
                             } 
@@ -481,7 +510,6 @@ void loop() {
                 else if (payload == "RESET") {
                     nvs_flash_erase(); 
                     nvs_flash_init();
-                    Serial.write('A'); 
                     delay(100);
                     ESP.restart();
                 }
@@ -558,6 +586,7 @@ bool ReceiveData() {
         if (channel < NUM_STRIPS && ledIndex < stripLengths[channel]) {
             if (strips[reverseIndex[channel]] != nullptr){
                 strips[reverseIndex[channel]]->SetPixelColor(ledIndex, RgbColor(r, g, b));
+                totalCurrent_mA += (((r + g + b) * 20) / 255) + 1;
             }
         }
         ledIndex ++;
@@ -593,6 +622,7 @@ bool ReceiveCompressedData() {
             if (channel < NUM_STRIPS && ledIndex < stripLengths[channel]) {
                 if (strips[reverseIndex[channel]] != nullptr){
                     strips[reverseIndex[channel]]->SetPixelColor(ledIndex, RgbColor(r, g, b));
+                    totalCurrent_mA += (((r + g + b) * 20) / 255) + 1;
                 }
             }
             ledIndex++;
@@ -635,6 +665,7 @@ bool ReceiveBulkData() {
                 if (channel < NUM_STRIPS) {
                     if (strips[reverseIndex[channel]] != nullptr){
                         strips[reverseIndex[channel]]->SetPixelColor(ledIndex, RgbColor(r, g, b));
+                        totalCurrent_mA += (((r + g + b) * 20) / 255) + 1;
                     }
                     ledIndex++;
                 }
@@ -654,6 +685,7 @@ bool ReceiveBulkData() {
             if (channel < NUM_STRIPS) {
                 if (strips[reverseIndex[channel]] != nullptr){
                     strips[reverseIndex[channel]]->SetPixelColor(ledIndex, RgbColor(r, g, b));
+                    totalCurrent_mA += (((r + g + b) * 20) / 255) + 1;
                 }
                 ledIndex++;
             }
