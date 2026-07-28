@@ -4,6 +4,9 @@
 // --- FEATURE SWITCH ---
 bool enable_led_test = true;
 
+// --- LED power supply max mA power adapter ---
+uint32_t maxCurrent_mA = 15000; // 15000 mA = 15A
+
 // --- W5500 LAN PINS ---
 #define W5500_MOSI 35
 #define W5500_SCK  36
@@ -80,6 +83,28 @@ void canShow(){
     }
 }
 
+uint32_t totalCurrent_mA = 0;
+void checkPowerLimit(){
+    if (!maxCurrent_mA) {totalCurrent_mA = 0; return;}
+    if (totalCurrent_mA > maxCurrent_mA) {
+        float factor = (float)maxCurrent_mA / (float)totalCurrent_mA;
+        uint8_t dimValue = (uint8_t)(factor * 255.0f);
+        
+        for (int channel = 0; channel < NUM_STRIPS; channel++) {
+            if (strips[reverseIndex[channel]] != nullptr) {
+                
+                uint16_t ledCount = activeLengths[channel];
+                
+                for (uint16_t i = 0; i < ledCount; i++) {
+                    RgbColor originalColor = strips[reverseIndex[channel]]->GetPixelColor(i);
+                    strips[reverseIndex[channel]]->SetPixelColor(i, originalColor.Dim(dimValue));
+                }
+            }
+        }
+    }
+    totalCurrent_mA = 0;
+}
+
 void UpdateFpsLed() {
     unsigned long currentMillis = millis();
     lastPacketTime = currentMillis;
@@ -150,11 +175,9 @@ void loadSettings() {
     preferences.begin("vpin", false);
     
     enable_led_test = preferences.getBool("led", enable_led_test);
-    //use_dhcp = preferences.getBool("dhcp", false);
-    // KORREKTUR: UChar (Unsigned Char) für uint8_t verwenden!
     fps_led_pin = preferences.getUChar("fps", fps_led_pin);
     freq_out_pin = preferences.getUChar("freq", freq_out_pin);
-    
+    maxCurrent_mA = preferences.getUInt("psuLimit", maxCurrent_mA);
     String savedIp = preferences.getString("ip", local_ip.toString());
     local_ip.fromString(savedIp);
     IPAddress local_ip(local_ip);
@@ -175,6 +198,7 @@ void saveSettings() {
     preferences.putBool("led", enable_led_test);
     preferences.putUChar("fps", fps_led_pin);
     preferences.putUChar("freq", freq_out_pin);
+    preferences.putUInt("psuLimit", maxCurrent_mA);
     preferences.putString("ip", local_ip.toString());
     preferences.putUShort("port", port);
     preferences.putBytes("pins", pins, NUM_STRIPS);
@@ -295,6 +319,7 @@ void loop() {
                     String portStr = String(port);
                     String response = "S3_FW:LAN;";
                     response += "LED:" + String(enable_led_test ? 1 : 0) + ";";
+                    response += "PSU:" + String(maxCurrent_mA) + ";";
                     response += "FPS:" + fpsStr + ";";
                     response += "FREQ:" + freqStr + ";";
                     response += "PINS:" + pinString + ";";
@@ -337,7 +362,10 @@ void loop() {
                             } 
                             else if (key == "FPS") {
                                 tempFps = (uint8_t)val.toInt();
-                            } 
+                            }
+                            else if (key == "PSU") {
+                                maxCurrent_mA = (uint32_t)val.toInt();
+                            }
                             else if (key == "FREQ") {
                                 tempFreq = (uint8_t)val.toInt();
                             } 
@@ -457,7 +485,7 @@ void loop() {
 
                     saveSettings();
                     
-                    while(!activeSerial);
+                    while(!Serial);
                     Serial.write('A');
                     
                     if (lanChanged) {
@@ -470,6 +498,7 @@ void loop() {
                     nvs_flash_erase(); 
                     nvs_flash_init();
                     
+                    while(!Serial);
                     Serial.write('A'); 
                     
                     delay(100);
@@ -534,11 +563,13 @@ void loop() {
                         uint8_t b = frameBuffer[byteIndex++];
                         if (strips[channel] != nullptr){
                             strips[channel]->SetPixelColor(len, RgbColor(r, g, b));
+                            totalCurrent_mA += (((r + g + b) * 20) / 255) + 1;
                         }
                     }
                 }
             }
             if (freq_out_pin != 255) digitalWrite(freq_out_pin, LOW);
+            checkPowerLimit();
             canShow();
             ShowAll();            
             UpdateFpsLed();
