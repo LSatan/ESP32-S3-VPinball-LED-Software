@@ -238,7 +238,7 @@ void setup() {
             if (Serial.available() > 0) return;
             yield();
         }
-
+        
         if (fps_led_pin != 255 && fpsLed != nullptr){
             fpsLed->SetPixelColor(0, applyBrightness(RgbColor(255, 255, 255), fpsLedBrightness)); 
             fpsLed->Show();
@@ -281,9 +281,6 @@ void setup() {
         SPI.begin(lan_pins[2], lan_pins[1], lan_pins[0], -1);
         Ethernet.init(lan_pins[3]);
         Ethernet.begin(mac, local_ip);
-        while (Ethernet.linkStatus() != LinkON) {
-            delay(100);
-        }
         udp.begin(port);
         delay(100);
         udp.flush();
