@@ -209,78 +209,29 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
         {
             if (ComPort == null || !ComPort.IsOpen) return;
 
-            // Enforce fast timeouts for the Soft-Fail mitigation (prevents thread freezing)
-            if (ComPort.ReadTimeout != 50) ComPort.ReadTimeout = 50;
-            if (ComPort.WriteTimeout != 50) ComPort.WriteTimeout = 50;
-
             try
             {
-                int FirstLed = 0;
-                for (int i = 0; i < NumberOfLedsPerStrip.Length; i++)
-                {
-                    int Leds = NumberOfLedsPerStrip[i];
-                    if (Leds > 0)
-                    {
-                        byte[] StripData = new byte[Leds * 3];
-                        Buffer.BlockCopy(OutputValues, FirstLed * 3, StripData, 0, Leds * 3);
-
-                        // Send the frame (Uses Q for compressed or R for classic uncompressed)
-                        SendLedstripData(StripData, i);
-
-                        // -----------------------------------------------------------------
-                        // WATCHDOG SOFT-FAIL LAYER (Protects against 2ms Windows stutters)
-                        // -----------------------------------------------------------------
-                        try
-                        {
-                            byte[] AnswerData = new byte[1];
-                            int bytesRead = ComPort.Read(AnswerData, 0, 1);
-
-                            if (bytesRead != 1 || AnswerData[0] != (byte)'A')
-                            {
-                                Log.Write($"[Watchdog Warning] Invalid or missing ACK from channel {i + 1}. Soft-failing frame...");
-                                ComPort.DiscardInBuffer();
-                            }
-                        }
-                        catch (TimeoutException)
-                        {
-                            // Soft-Fail: Ignore Windows stutters/timeouts, purge buffer and proceed to next frame
-                            // We do NOT crash the thread!
-                            Log.Write($"[Watchdog Warning] Timeout waiting for ACK on channel {i + 1}. Soft-failing frame and continuing...");
-                            ComPort.DiscardInBuffer();
-                        }
-                    }
-                    FirstLed += Leds;
-                }
-
-                // Send the 'O' (Output/Latch) command to display the frame
-                byte[] CommandData = new byte[1] { (byte)'O' };
-                ComPort.Write(CommandData, 0, 1);
-
+                // Rely on the base class to handle the standard frame transmission and ACK reading
+                base.UpdateOutputs(OutputValues);
+            }
+            catch (TimeoutException)
+            {
                 // -----------------------------------------------------------------
-                // WATCHDOG SOFT-FAIL LAYER for the Latch Command
+                // WATCHDOG SOFT-FAIL LAYER
                 // -----------------------------------------------------------------
-                try
-                {
-                    byte[] AnswerData = new byte[1];
-                    int bytesRead = ComPort.Read(AnswerData, 0, 1);
-                    if (bytesRead != 1 || AnswerData[0] != (byte)'A')
-                    {
-                        Log.Write($"[Watchdog Warning] Invalid or missing ACK after latch ('O'). Soft-failing frame...");
-                        ComPort.DiscardInBuffer();
-                    }
-                }
-                catch (TimeoutException)
-                {
-                    Log.Write("[Watchdog Warning] Timeout waiting for Latch ACK. Soft-failing frame and continuing...");
-                    ComPort.DiscardInBuffer();
-                }
+                // Catches Windows USB stutters or minor desyncs. Instead of freezing 
+                // the DirectOutput thread, it drops the current frame, purges the 
+                // buffer, and smoothly proceeds to the next incoming frame.
+                Log.Write("[Watchdog Warning] Timeout detected. Soft-failing frame and continuing...");
+                try { ComPort.DiscardInBuffer(); } catch { }
             }
             catch (Exception E)
             {
                 // -----------------------------------------------------------------
-                // WATCHDOG AUTOMATED HARDWARE RECOVERY LAYER (Physical Disconnection)
+                // WATCHDOG AUTOMATED HARDWARE RECOVERY LAYER 
                 // -----------------------------------------------------------------
-                // This catches IOException or similar hard crashes when EMI knocks out the USB port
+                // Catches hard crashes (e.g., physical EMI disconnects or IOExceptions).
+                // Automatically attempts to reset the COM port and re-flash the hardware setup.
                 Log.Write($"[Watchdog Critical] Hardware transmission crashed ({E.Message}). Starting automated hot-plug recovery...");
 
                 bool reconnectionSuccessful = false;
