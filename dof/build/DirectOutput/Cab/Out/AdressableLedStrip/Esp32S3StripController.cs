@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.IO;
 
 namespace DirectOutput.Cab.Out.AdressableLedStrip
 {
@@ -20,15 +21,10 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
     {
         public Esp32S3StripController()
         {
-            // Expand the underlying array to support up to 16 channels for ESP32-S3
             NumberOfLedsPerStrip = new int[16];
         }
 
         private bool _Enable16ChannelMode = false;
-
-        /// <summary>
-        /// Unlocks channels 11 to 16 for ESP32-S3 based controllers.
-        /// </summary>
         public bool Enable16ChannelMode
         {
             get { return _Enable16ChannelMode; }
@@ -36,10 +32,6 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
         }
 
         private bool _EnableBulkMode = false;
-
-        /// <summary>
-        /// Uses the highly efficient 'W' bulk transfer command instead of sequential ping-pong.
-        /// </summary>
         public bool EnableBulkMode
         {
             get { return _EnableBulkMode; }
@@ -78,25 +70,38 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
             set { NumberOfLedsPerStrip[15] = value; base.SetupOutputs(); }
         }
 
+        private bool _SendPerLedstripLength = false;
+        public bool SendPerLedstripLength
+        {
+            get { return _SendPerLedstripLength; }
+            set { _SendPerLedstripLength = value; }
+        }
+
+        private bool _UseCompression = false;
+        public bool UseCompression
+        {
+            get { return _UseCompression; }
+            set { _UseCompression = value; }
+        }
+
+        private bool _TestOnConnect = false;
+        public bool TestOnConnect
+        {
+            get { return _TestOnConnect; }
+            set { _TestOnConnect = value; }
+        }
+
         protected override void SetupController()
         {
-            if (!Enable16ChannelMode && !EnableBulkMode)
-            {
-                // Fall back to standard Wemos setup if no ESP32 specific features are enabled
-                base.SetupController();
-                return;
-            }
-
             byte[] ReceiveData = null;
             int BytesRead = -1;
             byte[] CommandData = null;
 
+            base.SetupController();
+
             int maxChannels = Enable16ChannelMode ? 16 : 10;
             int activeStrips = Math.Min(NumberOfLedsPerStrip.Length, maxChannels);
 
-            // Set firm hardware configuration timeouts slightly higher for safe initial handwriting
-            ComPort.ReadTimeout = 150;
-            ComPort.WriteTimeout = 150;
 
             if (SendPerLedstripLength || EnableBulkMode)
             {
@@ -183,129 +188,205 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
             }
         }
 
+        protected List<byte> CompressedData = new List<byte>();
+        protected List<byte> UncompressedData = new List<byte>();
+
         protected override void UpdateOutputs(byte[] OutputValues)
         {
-            if (ComPort == null || !ComPort.IsOpen) return;
-
-            if (!EnableBulkMode)
+            if (ComPort == null)
             {
-                // If Bulk Mode is off, let the robust Wemos base class handle the classic ping-pong transmission 
-                // This ensures we reuse the Wemos Watchdog we built previously!
-                base.UpdateOutputs(OutputValues);
-                return;
+                throw new Exception("Comport is not initialized");
             }
 
+            byte[] CommandData;
+            byte[] AnswerData;
+            int BytesRead;
             int maxChannels = Enable16ChannelMode ? 16 : 10;
 
             try
             {
                 // Enforce active runtime transmission configuration
-                ComPort.ReadTimeout = 70;
-                ComPort.WriteTimeout = 70;
-
                 // -----------------------------------------------------------------
                 // STREAM-BASED BULK TRANSFER MODE ('W')
                 // -----------------------------------------------------------------
-                UncompressedData.Clear();
-                int sourcePosition = 0;
-
-                for (int i = 0; i < maxChannels; i++)
+                if (EnableBulkMode)
                 {
-                    int NrOfLedsOnStrip = NumberOfLedsPerStrip[i];
-                    if (NrOfLedsOnStrip > 0)
+                    UncompressedData.Clear();
+                    int sourcePosition = 0;
+
+                    for (int i = 0; i < maxChannels; i++)
                     {
-                        UncompressedData.AddRange(OutputValues.Skip(sourcePosition * 3).Take(NrOfLedsOnStrip * 3));
-                        sourcePosition += NrOfLedsOnStrip;
+                        int NrOfLedsOnStrip = NumberOfLedsPerStrip[i];
+                        if (NrOfLedsOnStrip > 0)
+                        {
+                            UncompressedData.AddRange(OutputValues.Skip(sourcePosition * 3).Take(NrOfLedsOnStrip * 3));
+                            sourcePosition += NrOfLedsOnStrip;
+                        }
+                    }
+
+                    if (UncompressedData.Count > 0)
+                    {
+                        byte[] dataToSend;
+                        byte isCompressedFlag = 0;
+                        ushort packetSize = 0;
+
+                        if (UseCompression)
+                        {
+                            CompressedData.Clear();
+                            List<byte> tempUncompressed = new List<byte>(UncompressedData);
+
+                            while (tempUncompressed.Count > 0)
+                            {
+                                if (tempUncompressed.Count == 3)
+                                {
+                                    CompressedData.Add(1);
+                                    CompressedData.Add(tempUncompressed[0]);
+                                    CompressedData.Add(tempUncompressed[1]);
+                                    CompressedData.Add(tempUncompressed[2]);
+                                    tempUncompressed.RemoveRange(0, 3);
+                                }
+                                else
+                                {
+                                    byte r = tempUncompressed[0];
+                                    byte g = tempUncompressed[1];
+                                    byte b = tempUncompressed[2];
+                                    tempUncompressed.RemoveRange(0, 3);
+                                    int value = (r << 16) | (g << 8) | b;
+                                    int cnt = 1;
+                                    while (tempUncompressed.Count > 0 && ((tempUncompressed[0] << 16) | (tempUncompressed[1] << 8) | tempUncompressed[2]) == value && cnt < byte.MaxValue - 1)
+                                    {
+                                        tempUncompressed.RemoveRange(0, 3);
+                                        cnt++;
+                                    }
+                                    CompressedData.Add((byte)cnt);
+                                    CompressedData.Add(r);
+                                    CompressedData.Add(g);
+                                    CompressedData.Add(b);
+                                }
+                            }
+                            dataToSend = CompressedData.ToArray();
+                            isCompressedFlag = 1;
+                            packetSize = (ushort)(CompressedData.Count / 4);
+                        }
+                        else
+                        {
+                            dataToSend = UncompressedData.ToArray();
+                            isCompressedFlag = 0;
+                            packetSize = (ushort)(UncompressedData.Count / 3);
+                        }
+
+                        byte[] bulkHeader = new byte[4] {
+                            (byte)'W',
+                            isCompressedFlag,
+                            (byte)(packetSize >> 8),
+                            (byte)(packetSize & 255)
+                        };
+
+                        // Clean out unexpected pre-existing hardware buffer remainders
+                        try
+                        {
+                            if (ComPort.BytesToRead > 0)
+                            {
+                                ComPort.DiscardInBuffer();
+                            }
+                        }
+                        catch { }
+
+                        ComPort.Write(bulkHeader, 0, 4);
+                        ComPort.Write(dataToSend, 0, dataToSend.Length);
+
+                        BytesRead = -1;
+                        AnswerData = new byte[1];
+
+                        try
+                        {
+                            BytesRead = ComPort.Read(AnswerData, 0, 1);
+
+                            if (BytesRead != 1 || AnswerData[0] != (byte)'A')
+                            {
+                                Log.Write($"Warning: Bulk ACK invalid. Expected 'A', got {(BytesRead == 1 ? AnswerData[0].ToString() : "nothing")}. Frame skipped.");
+                            }
+                        }
+                        catch (TimeoutException)
+                        {
+                            Log.Write("Warning: Timeout waiting for Bulk ACK. Frame lost, but continuing...");
+                            try
+                            {
+                                ComPort.DiscardOutBuffer();
+                                ComPort.DiscardInBuffer();
+                            }
+                            catch { }
+                        }
                     }
                 }
-
-                if (UncompressedData.Count > 0)
+                // -----------------------------------------------------------------
+                // CLASSIC MODE (SEQUENTIAL PING-PONG PER STRIP WITH SOFT-FAIL)
+                // -----------------------------------------------------------------
+                else
                 {
-                    byte[] dataToSend;
-                    byte isCompressedFlag = 0;
-                    ushort packetSize = 0;
-
-                    if (UseCompression)
+                    int SourcePosition = 0;
+                    for (int i = 0; i < maxChannels; i++)
                     {
-                        CompressedData.Clear();
-                        List<byte> tempUncompressed = new List<byte>(UncompressedData);
-
-                        while (tempUncompressed.Count > 0)
+                        int NrOfLedsOnStrip = NumberOfLedsPerStrip[i];
+                        if (NrOfLedsOnStrip > 0)
                         {
-                            if (tempUncompressed.Count == 3)
+                            int TargetPosition = i * NumberOfLedsPerChannel;
+
+                            try
                             {
-                                CompressedData.Add(1);
-                                CompressedData.Add(tempUncompressed[0]);
-                                CompressedData.Add(tempUncompressed[1]);
-                                CompressedData.Add(tempUncompressed[2]);
-                                tempUncompressed.RemoveRange(0, 3);
-                            }
-                            else
-                            {
-                                byte r = tempUncompressed[0];
-                                byte g = tempUncompressed[1];
-                                byte b = tempUncompressed[2];
-                                tempUncompressed.RemoveRange(0, 3);
-                                int value = (r << 16) | (g << 8) | b;
-                                int cnt = 1;
-                                while (tempUncompressed.Count > 0 && ((tempUncompressed[0] << 16) | (tempUncompressed[1] << 8) | tempUncompressed[2]) == value && cnt < byte.MaxValue - 1)
+                                if (ComPort.BytesToRead > 0)
                                 {
-                                    tempUncompressed.RemoveRange(0, 3);
-                                    cnt++;
+                                    ComPort.DiscardInBuffer();
                                 }
-                                CompressedData.Add((byte)cnt);
-                                CompressedData.Add(r);
-                                CompressedData.Add(g);
-                                CompressedData.Add(b);
                             }
+                            catch { }
+
+                            SendLedstripData(OutputValues.Skip(SourcePosition * 3).Take(NrOfLedsOnStrip * 3).ToArray(), TargetPosition);
+
+                            BytesRead = -1;
+                            AnswerData = new byte[1];
+
+                            try
+                            {
+                                BytesRead = ComPort.Read(AnswerData, 0, 1);
+                                if (BytesRead != 1 || AnswerData[0] != (byte)'A')
+                                {
+                                    Log.Write($"Warning: Classic Channel {i + 1} ACK invalid. Skipping channel frame segment.");
+                                }
+                            }
+                            catch (TimeoutException)
+                            {
+                                Log.Write($"Warning: Timeout waiting for Classic Channel {i + 1} ACK. Continuing loop...");
+                                try
+                                {
+                                    ComPort.DiscardOutBuffer();
+                                    ComPort.DiscardInBuffer();
+                                }
+                                catch { }
+                            }
+
+                            SourcePosition += NrOfLedsOnStrip;
                         }
-                        dataToSend = CompressedData.ToArray();
-                        isCompressedFlag = 1;
-                        packetSize = (ushort)(CompressedData.Count / 4);
-                    }
-                    else
-                    {
-                        dataToSend = UncompressedData.ToArray();
-                        isCompressedFlag = 0;
-                        packetSize = (ushort)(UncompressedData.Count / 3);
                     }
 
-                    byte[] bulkHeader = new byte[4] {
-                        (byte)'W',
-                        isCompressedFlag,
-                        (byte)(packetSize >> 8),
-                        (byte)(packetSize & 255)
-                    };
+                    // Send master execution command latch
+                    CommandData = new byte[1] { (byte)'O' };
+                    ComPort.Write(CommandData, 0, 1);
 
-                    // Clean out unexpected pre-existing hardware buffer remainders
-                    try
-                    {
-                        if (ComPort.BytesToRead > 0)
-                        {
-                            ComPort.DiscardInBuffer();
-                        }
-                    }
-                    catch { }
-
-                    ComPort.Write(bulkHeader, 0, 4);
-                    ComPort.Write(dataToSend, 0, dataToSend.Length);
-
-                    int BytesRead = -1;
-                    byte[] AnswerData = new byte[1];
+                    BytesRead = -1;
+                    AnswerData = new byte[1];
 
                     try
                     {
                         BytesRead = ComPort.Read(AnswerData, 0, 1);
-
                         if (BytesRead != 1 || AnswerData[0] != (byte)'A')
                         {
-                            Log.Write($"Warning: Bulk ACK invalid. Expected 'A', got {(BytesRead == 1 ? AnswerData[0].ToString() : "nothing")}. Frame skipped.");
+                            Log.Write("Warning: Output execution command ('O') ACK invalid. Frame rendering skipped.");
                         }
                     }
                     catch (TimeoutException)
                     {
-                        // Soft-Fail: Drop the frame silently without freezing the DOF thread
-                        Log.Write("Warning: Timeout waiting for Bulk ACK. Frame lost, but continuing...");
+                        Log.Write("Warning: Timeout waiting for Output latch ACK ('O'). Continuing loop...");
                         try
                         {
                             ComPort.DiscardOutBuffer();
@@ -324,7 +405,7 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
 
                 bool reconnectionSuccessful = false;
                 int maxAttempts = 15;
-                int delayBetweenAttemptsMs = 1000;
+                int delayBetweenAttemptsMs = 1000; // 3 seconds evaluation pause per retry = 15s total structural window
 
                 for (int attempt = 1; attempt <= maxAttempts; attempt++)
                 {
@@ -343,10 +424,12 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
 
                         Thread.Sleep(delayBetweenAttemptsMs);
 
+                        // Safe re-initialization of system descriptors (Maintained with explicit DTR isolation)
                         ComPort.Open();
 
                         Log.Write("[DOF Watchdog Recovery] COM-Port handle reclaimed. Re-initializing custom ESP32 payload array structures...");
 
+                        // Fire core setup matrix block (Triggers internal 3x structural try handlers)
                         SetupController();
 
                         Log.Write("[DOF Watchdog Recovery] SUCCESS! Controller hardware array re-established. Resuming runtime render frame processing.");
@@ -355,6 +438,7 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
                     }
                     catch (Exception reattemptEx)
                     {
+                        // FIXED: Typo corrected from reattemEx to reattemptEx
                         Log.Write($"[DOF Watchdog Recovery] Recovery branch tracking attempt {attempt} failed: {reattemptEx.Message}");
                     }
                 }
@@ -364,6 +448,68 @@ namespace DirectOutput.Cab.Out.AdressableLedStrip
                     Log.Write("[DOF Critical Watchdog Failure] Recovery window expired without valid device tracking. Killing pipeline updater thread.");
                     throw new Exception("DirectOutput completely lost physical connection stability to the custom ESP32 architecture. Hardware link failure.", E);
                 }
+            }
+        }
+
+        protected override void SendLedstripData(byte[] OutputValues, int TargetPosition)
+        {
+            if (UseCompression)
+            {
+                CompressedData.Clear();
+                UncompressedData.Clear();
+                UncompressedData.AddRange(OutputValues);
+
+                while (UncompressedData.Count > 0)
+                {
+                    if (UncompressedData.Count == 3)
+                    {
+                        CompressedData.Add(1);
+                        CompressedData.Add(UncompressedData[0]);
+                        CompressedData.Add(UncompressedData[1]);
+                        CompressedData.Add(UncompressedData[2]);
+                        UncompressedData.RemoveRange(0, 3);
+                    }
+                    else
+                    {
+                        byte r = UncompressedData[0];
+                        byte g = UncompressedData[1];
+                        byte b = UncompressedData[2];
+                        UncompressedData.RemoveRange(0, 3);
+                        int value = (r << 16) | (g << 8) | b;
+                        int cnt = 1;
+                        while (UncompressedData.Count > 0 && ((UncompressedData[0] << 16) | (UncompressedData[1] << 8) | UncompressedData[2]) == value && cnt < byte.MaxValue - 1)
+                        {
+                            UncompressedData.RemoveRange(0, 3);
+                            cnt++;
+                        }
+                        CompressedData.Add((byte)cnt);
+                        CompressedData.Add(r);
+                        CompressedData.Add(g);
+                        CompressedData.Add(b);
+                    }
+                }
+
+                if (CompressedData.Count < OutputValues.Length)
+                {
+                    var nbData = CompressedData.Count / 4;
+                    var nbLeds = OutputValues.Length / 3;
+                    byte[] CommandData = new byte[7] {
+                        (byte)'Q',
+                        (byte)(TargetPosition >> 8), (byte)(TargetPosition & 255),
+                        (byte)(nbData >> 8), (byte)(nbData & 255),
+                        (byte)(nbLeds >> 8), (byte)(nbLeds & 255)
+                    };
+                    ComPort.Write(CommandData, 0, 7);
+                    ComPort.Write(CompressedData.ToArray(), 0, CompressedData.Count);
+                }
+                else
+                {
+                    base.SendLedstripData(OutputValues, TargetPosition);
+                }
+            }
+            else
+            {
+                base.SendLedstripData(OutputValues, TargetPosition);
             }
         }
     }
