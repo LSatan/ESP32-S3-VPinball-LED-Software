@@ -53,12 +53,7 @@ RgbColor applyBrightness(RgbColor color, uint8_t brightness) {
 
 void Ack() {
     while (!Serial);
-    uint8_t ackRetries = 0;
-    while (Serial.write('A') == 0 && ackRetries < 50) {
-        delayMicroseconds(100);
-        yield();
-        ackRetries++;
-    }
+    Serial.write('A');
 }
 
 void ShowAll() {
